@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Light mode CSS custom properties (default) */
+  :root {
+    --color-bg:           #F9F7FF;
+    --color-surface:      #FFFFFF;
+    --color-surface-alt:  #F0EDF8;
+    --color-text:         #2D2B4E;
+    --color-text-muted:   #6B6A88;
+    --color-primary:      #7C6FAD;
+    --color-primary-hover:#6B5F9E;
+    --color-secondary:    #68A691;
+    --color-border:       #E2DFF2;
+    --color-warning:      #E8A838;
+    --color-danger:       #E07070;
+  }
+
+  /* Dark mode — activated by .dark class on <html> */
+  .dark {
+    --color-bg:           #1A1828;
+    --color-surface:      #232140;
+    --color-surface-alt:  #2D2A50;
+    --color-text:         #EBEBF5;
+    --color-text-muted:   #9CA3AF;
+    --color-primary:      #9D8FCC;
+    --color-primary-hover:#AFA0D8;
+    --color-secondary:    #7FBFA8;
+    --color-border:       #3B3860;
+    --color-warning:      #F0B848;
+    --color-danger:       #F08080;
+  }
+
+  /* Base styles */
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  /* Respect users who prefer reduced motion — disable non-essential animation */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
