@@ -1,6 +1,99 @@
 /**
- * Milestone repository. Phase 0 stub — CRUD lands in Phase 1.
- * Milestones auto-complete when all their tasks complete; that logic will live
- * partly here (data writes) and partly in the engine (the decision), never in UI.
+ * Milestone repository — all database access for the Milestone entity.
+ *
+ * WHY this file exists:
+ * Per the data-flow rule (DB -> Repositories -> Engine -> Store -> UI), every
+ * read or write touching the `milestones` store lives here. Nothing outside
+ * database/repositories/ may import `db` or query the table directly.
+ *
+ * Mirrors goalRepository / subgoalRepository, with two DELIBERATE differences
+ * driven by the canonical Milestone type:
+ *   1. Milestone has NO `updatedAt`. We set `createdAt` on create and never
+ *      maintain an "updated" timestamp — updateMilestone only patches fields.
+ *   2. Required-on-create fields are subgoalId, title, status, order,
+ *      aiSuggested (description and completedAt are optional).
  */
-export const milestoneRepository = {};
+
+import { nanoid } from 'nanoid';
+import { db } from '@/database/db';
+import type { ID, Milestone, MilestoneStatus } from '@/core/types';
+
+/**
+ * Fields the CALLER must provide. id and createdAt are generated here, so they
+ * are omitted from the input. Everything else — including the required
+ * subgoalId, status, order, aiSuggested — comes from the caller; the repository
+ * does not invent parent relationships or ordering.
+ */
+export type CreateMilestoneInput = Omit<Milestone, 'id' | 'createdAt'>;
+
+/**
+ * Patchable fields. id and createdAt are immutable after creation, so they are
+ * not patchable. (There is intentionally no updatedAt to refresh.)
+ */
+export type UpdateMilestoneInput = Partial<Omit<Milestone, 'id' | 'createdAt'>>;
+
+export async function createMilestone(
+  input: CreateMilestoneInput
+): Promise<Milestone> {
+  // nanoid id + a single ISO createdAt — same identity convention as the goal
+  // and subgoal repositories. No updatedAt: Milestone does not have one.
+  const milestone: Milestone = {
+    ...input,
+    id: nanoid(),
+    createdAt: new Date().toISOString(),
+  };
+  await db.milestones.add(milestone);
+  return milestone;
+}
+
+export async function getMilestoneById(id: ID): Promise<Milestone | undefined> {
+  // Primary-key lookup — `id` is the store's key, so this is a direct get().
+  return db.milestones.get(id);
+}
+
+export async function getMilestonesBySubgoalId(
+  subgoalId: ID
+): Promise<Milestone[]> {
+  // INDEXING NOTE: stores.ts was not available this session, so whether
+  // `subgoalId` is indexed on the milestones store is UNCONFIRMED. Per the
+  // project's minimal-indexing convention and the in-memory default, we filter
+  // in memory rather than risk a SchemaError from where('subgoalId').
+  // If stores.ts indexes subgoalId on milestones (likely — mirrors subgoals'
+  // goalId), replace the toArray()+filter with:
+  //     await db.milestones.where('subgoalId').equals(subgoalId).toArray()
+  // to match getSubgoalsByGoalId. The `order` sort stays in memory regardless,
+  // since `order` is not indexed (same as getSubgoalsByGoalId).
+  const all = await db.milestones.toArray();
+  return all
+    .filter((m) => m.subgoalId === subgoalId)
+    .sort((a, b) => a.order - b.order);
+}
+
+export async function getMilestonesByStatus(
+  status: MilestoneStatus
+): Promise<Milestone[]> {
+  // In-memory filter — `status` is not indexed (consistent with subgoals, where
+  // getSubgoalsByStatus also filters in memory). Milestone counts are tiny.
+  const all = await db.milestones.toArray();
+  return all.filter((m) => m.status === status);
+}
+
+export async function updateMilestone(
+  id: ID,
+  changes: UpdateMilestoneInput
+): Promise<void> {
+  // Dexie's update() returns the number of rows modified; 0 means no row matched
+  // the id — we throw, matching the updateGoal / updateSubgoal contract.
+  // IMPORTANT: unlike subgoals, we do NOT refresh an updatedAt — Milestone has none.
+  const updatedCount = await db.milestones.update(id, changes);
+  if (updatedCount === 0) {
+    throw new Error(`updateMilestone: no milestone found with id "${id}"`);
+  }
+}
+
+export async function deleteMilestone(id: ID): Promise<void> {
+  // TODO Phase 3: cascade delete tasks belonging to this milestone (and clear
+  // any dependencies referencing it). For now this removes only the milestone
+  // row, mirroring deleteSubgoal's Phase-1 behavior.
+  await db.milestones.delete(id);
+}

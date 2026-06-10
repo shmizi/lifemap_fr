@@ -3,8 +3,8 @@
  * rather than reaching into individual files.
  */
 export * from './goalRepository';
-export { subgoalRepository } from './subgoalRepository';
-export { milestoneRepository } from './milestoneRepository';
+export * from './subgoalRepository';
+export * from './milestoneRepository';
 export { taskRepository } from './taskRepository';
 export { dependencyRepository } from './dependencyRepository';
 export { profileRepository } from './profileRepository';

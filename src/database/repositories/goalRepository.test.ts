@@ -1,5 +1,3 @@
-console.log(">>> TS FILE ACTUALLY RAN <<<");
-
 // fake-indexeddb/auto must be imported before anything that touches Dexie, so
 // that indexedDB exists as a global the moment db.ts constructs the database.
 import 'fake-indexeddb/auto';
