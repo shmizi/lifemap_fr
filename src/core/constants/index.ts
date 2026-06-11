@@ -1,7 +1,14 @@
 // Application-wide constants.
 // Never use magic strings or numbers directly in components — import from here.
 
-import type { GoalCategory, GoalStatus, Priority } from '@/core/types';
+import type {
+  GoalCategory,
+  GoalStatus,
+  Priority,
+  SubgoalStatus,
+  MilestoneStatus,
+  TaskStatus,
+} from '@/core/types';
 
 export const APP_NAME = 'LifeMap' as const;
 
@@ -46,3 +53,34 @@ export const GOAL_CATEGORY_OPTIONS: ReadonlyArray<{
 // use these defaults until a later phase exposes them in the UI.
 export const DEFAULT_GOAL_STATUS: GoalStatus = 'active';
 export const DEFAULT_GOAL_PRIORITY: Priority = 'medium';
+
+// ─── Status & priority display labels (Phase 1) ──────────────────────────────
+// Map the canonical stored enum values to human-readable text, so display code
+// (the Goal Detail View, and later the dashboard) never hardcodes label strings.
+// These are display-only; the values stored in the database are the keys.
+export const SUBGOAL_STATUS_LABELS: Record<SubgoalStatus, string> = {
+  not_started: 'Not started',
+  active:      'Active',
+  completed:   'Completed',
+  at_risk:     'At risk',
+};
+
+export const MILESTONE_STATUS_LABELS: Record<MilestoneStatus, string> = {
+  locked:    'Locked',
+  active:    'Active',
+  completed: 'Completed',
+};
+
+export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
+  pending:     'Pending',
+  in_progress: 'In progress',
+  completed:   'Completed',
+  skipped:     'Skipped',
+};
+
+export const PRIORITY_LABELS: Record<Priority, string> = {
+  low:      'Low',
+  medium:   'Medium',
+  high:     'High',
+  critical: 'Critical',
+};
