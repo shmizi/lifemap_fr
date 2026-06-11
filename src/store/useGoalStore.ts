@@ -14,7 +14,12 @@
 
 import { create } from 'zustand'
 import type { Goal, GoalTree, ID } from '@/core/types'
-import { getAllGoals, createGoal, getGoalTree } from '@/database/repositories'
+import {
+  getAllGoals,
+  createGoal,
+  deleteGoal,
+  getGoalTree,
+} from '@/database/repositories'
 
 // The shape of a brand-new goal as supplied by the creation form. The repository
 // owns id + timestamps, so the caller never provides them.
@@ -26,6 +31,7 @@ interface GoalState {
   isLoadingGoals: boolean
   loadGoals: () => Promise<void>
   addGoal: (input: NewGoalInput) => Promise<Goal>
+  removeGoal: (id: ID) => Promise<void>
 
   // --- selection ---
   selectedGoalId: ID | null
@@ -65,6 +71,18 @@ export const useGoalStore = create<GoalState>()((set) => ({
     const goals = await getAllGoals()
     set({ goals })
     return goal
+  },
+
+  // Delete a goal, then reload the list so the UI reflects the removal.
+  // TODO(Phase 3): cascade cleanup. deleteGoal is a plain delete per the repo
+  // convention — it removes ONLY the goal row, not its subgoals/milestones/tasks.
+  // Safe today because no subgoal-creation UI exists yet, so a goal has no
+  // children to orphan. Once subgoals can be created, this action (or the
+  // repository) must also remove the goal's descendants and dependencies.
+  removeGoal: async (id) => {
+    await deleteGoal(id)
+    const goals = await getAllGoals()
+    set({ goals })
   },
 
   // --- selection ---
