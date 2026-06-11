@@ -1,6 +1,105 @@
 /**
- * Task repository. Phase 0 stub — CRUD lands in Phase 1.
- * Will expose queries by subgoal, by milestone, by status, and by scheduledDate
- * (the Today dashboard's daily-task lookup).
+ * Task repository — all database access for the Task entity.
+ *
+ * WHY this file exists:
+ * Per the data-flow rule (DB -> Repositories -> Engine -> Store -> UI), every
+ * read or write touching the `tasks` store lives here. Nothing outside
+ * database/repositories/ may import `db` or query the table directly.
+ *
+ * Task is the richest entity in the hierarchy, with two differences from
+ * milestones that matter here:
+ *   1. Task HAS `updatedAt` (like Subgoal). createTask stamps createdAt +
+ *      updatedAt; updateTask refreshes updatedAt on every patch.
+ *   2. `milestoneId` is OPTIONAL — undefined means the task attaches directly
+ *      to its subgoal with no milestone in between.
+ *
+ * INDEXING (from stores.ts): tasks = 'id, subgoalId, milestoneId, status,
+ * scheduledDate'. All four query fields are indexed, so the getters below use
+ * where().equals() directly. `order` is NOT indexed, so order sorting is done
+ * in memory (same convention as the other parent-child getters).
  */
-export const taskRepository = {};
+
+import { nanoid } from 'nanoid';
+import { db } from '@/database/db';
+import type { ID, ISODate, Task, TaskStatus } from '@/core/types';
+
+/**
+ * Fields the CALLER provides. id/createdAt/updatedAt are generated here, so they
+ * are omitted. Required by the Task type: subgoalId, title, status, priority,
+ * isRecurring, order. Optional: description, dueDate, scheduledDate,
+ * estimatedMinutes, completedAt, milestoneId.
+ */
+export type CreateTaskInput = Omit<Task, 'id' | 'createdAt' | 'updatedAt'>;
+
+/** Patchable fields. id/createdAt/updatedAt are managed by the repository. */
+export type UpdateTaskInput = Partial<Omit<Task, 'id' | 'createdAt' | 'updatedAt'>>;
+
+export async function createTask(input: CreateTaskInput): Promise<Task> {
+  // One `now` used for both stamps so a freshly-created task has
+  // createdAt === updatedAt — makes "never edited" detectable and keeps tests
+  // deterministic.
+  const now = new Date().toISOString();
+  const task: Task = {
+    ...input,
+    id: nanoid(),
+    createdAt: now,
+    updatedAt: now,
+  };
+  await db.tasks.add(task);
+  return task;
+}
+
+export async function getTaskById(id: ID): Promise<Task | undefined> {
+  // Primary-key lookup.
+  return db.tasks.get(id);
+}
+
+export async function getTasksBySubgoalId(subgoalId: ID): Promise<Task[]> {
+  // subgoalId IS indexed → query via the index, then sort by `order` in memory
+  // (order is not indexed). Same shape as getSubgoalsByGoalId.
+  const tasks = await db.tasks.where('subgoalId').equals(subgoalId).toArray();
+  return tasks.sort((a, b) => a.order - b.order);
+}
+
+export async function getTasksByMilestoneId(milestoneId: ID): Promise<Task[]> {
+  // milestoneId IS indexed. Tasks with an undefined milestoneId are simply not
+  // present in this index, so they're correctly excluded. Sorted by `order` in
+  // memory, consistent with the other parent-child getters.
+  const tasks = await db.tasks.where('milestoneId').equals(milestoneId).toArray();
+  return tasks.sort((a, b) => a.order - b.order);
+}
+
+export async function getTasksByStatus(status: TaskStatus): Promise<Task[]> {
+  // status IS indexed → query directly. Cross-cutting filter, so no order sort
+  // (callers that need ordering will sort by the dimension they care about).
+  return db.tasks.where('status').equals(status).toArray();
+}
+
+export async function getTasksByScheduledDate(scheduledDate: ISODate): Promise<Task[]> {
+  // scheduledDate IS indexed → exact-match query. Tasks with no scheduledDate
+  // are absent from this index and correctly excluded.
+  // NOTE: the Today dashboard may later range-query this index
+  // (where('scheduledDate').between(start, end)); that is out of scope here and
+  // not built yet — this getter only does exact equality.
+  return db.tasks.where('scheduledDate').equals(scheduledDate).toArray();
+}
+
+export async function updateTask(id: ID, changes: UpdateTaskInput): Promise<void> {
+  // Refresh updatedAt on every patch (Task HAS this field, unlike Milestone).
+  // Dexie's update() returns the modified-row count; 0 means no match → throw,
+  // matching the updateGoal / updateSubgoal contract.
+  const updatedCount = await db.tasks.update(id, {
+    ...changes,
+    updatedAt: new Date().toISOString(),
+  });
+  if (updatedCount === 0) {
+    throw new Error(`updateTask: no task found with id "${id}"`);
+  }
+}
+
+export async function deleteTask(id: ID): Promise<void> {
+  // Task is a leaf node — no child entities to cascade.
+  // TODO Phase 3: clear any task->task Dependency rows referencing this id, to
+  // avoid dangling dependencies once the dependency engine exists.
+  await db.tasks.delete(id);
+}

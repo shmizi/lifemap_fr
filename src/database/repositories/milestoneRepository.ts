@@ -54,19 +54,15 @@ export async function getMilestoneById(id: ID): Promise<Milestone | undefined> {
 export async function getMilestonesBySubgoalId(
   subgoalId: ID
 ): Promise<Milestone[]> {
-  // INDEXING NOTE: stores.ts was not available this session, so whether
-  // `subgoalId` is indexed on the milestones store is UNCONFIRMED. Per the
-  // project's minimal-indexing convention and the in-memory default, we filter
-  // in memory rather than risk a SchemaError from where('subgoalId').
-  // If stores.ts indexes subgoalId on milestones (likely — mirrors subgoals'
-  // goalId), replace the toArray()+filter with:
-  //     await db.milestones.where('subgoalId').equals(subgoalId).toArray()
-  // to match getSubgoalsByGoalId. The `order` sort stays in memory regardless,
-  // since `order` is not indexed (same as getSubgoalsByGoalId).
-  const all = await db.milestones.toArray();
-  return all
-    .filter((m) => m.subgoalId === subgoalId)
-    .sort((a, b) => a.order - b.order);
+  // subgoalId IS indexed on the milestones store (stores.ts: 'id, subgoalId'),
+  // so we query via the index instead of scanning the whole table — consistent
+  // with getSubgoalsByGoalId and getTasksBySubgoalId. `order` is not indexed, so
+  // that sort stays in memory (same convention as the other by-parent getters).
+  const milestones = await db.milestones
+    .where('subgoalId')
+    .equals(subgoalId)
+    .toArray();
+  return milestones.sort((a, b) => a.order - b.order);
 }
 
 export async function getMilestonesByStatus(

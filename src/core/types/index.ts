@@ -125,3 +125,30 @@ export interface Opportunity {
   dismissed: boolean;
   savedAt: ISODate;
 }
+
+// ─── View-model tree types (Phase 1, Session 5) ──────────────────────────────
+// READ-ONLY display shapes. These are NEVER persisted to the database — they are
+// assembled in memory (see hierarchyRepository.getGoalTree) so a screen like the
+// Goal Detail View receives ONE fully-typed nested object instead of making
+// multiple store calls and re-reconstructing parent-child relationships in the
+// component. Keeping the assembled shape typed here lets the UI stay dumb.
+
+export interface TaskTree {
+  task: Task;
+}
+
+export interface MilestoneTree {
+  milestone: Milestone;
+  tasks: Task[];
+}
+
+export interface SubgoalTree {
+  subgoal: Subgoal;
+  milestones: MilestoneTree[]; // milestones of this subgoal, each with its tasks
+  looseTasks: Task[];          // tasks with no milestoneId, directly under subgoal
+}
+
+export interface GoalTree {
+  goal: Goal;
+  subgoals: SubgoalTree[];
+}
