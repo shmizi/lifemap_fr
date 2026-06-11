@@ -13,17 +13,28 @@
 // the engine layer in later phases, never cached as state.
 
 import { create } from 'zustand'
-import type { Goal, GoalTree, ID } from '@/core/types'
+import type { Goal, Subgoal, GoalTree, ID } from '@/core/types'
 import {
   getAllGoals,
   createGoal,
   deleteGoal,
   getGoalTree,
+  getSubgoalsByGoalId,
+  createSubgoal,
 } from '@/database/repositories'
 
 // The shape of a brand-new goal as supplied by the creation form. The repository
 // owns id + timestamps, so the caller never provides them.
 export type NewGoalInput = Omit<Goal, 'id' | 'createdAt' | 'updatedAt'>
+
+// The shape of a brand-new subgoal as supplied by the creation form. The
+// repository owns id + timestamps; the store action owns `order` (it needs to
+// look at existing siblings to compute the next position), so the form supplies
+// neither of those.
+export type NewSubgoalInput = Omit<
+  Subgoal,
+  'id' | 'createdAt' | 'updatedAt' | 'order'
+>
 
 interface GoalState {
   // --- goal list ---
@@ -42,6 +53,7 @@ interface GoalState {
   currentGoalTree: GoalTree | null
   isLoadingTree: boolean
   loadGoalTree: (id: ID) => Promise<void>
+  addSubgoal: (input: NewSubgoalInput) => Promise<Subgoal>
 }
 
 export const useGoalStore = create<GoalState>()((set) => ({
@@ -106,5 +118,33 @@ export const useGoalStore = create<GoalState>()((set) => ({
     } finally {
       set({ isLoadingTree: false })
     }
+  },
+
+  // Create a subgoal under a goal, then refresh the assembled tree in place so
+  // the Goal Detail View shows it immediately.
+  //
+  // WHY compute `order` here: createSubgoal makes the caller own `order` (a
+  // subgoal needs a display position). Deciding the next position requires
+  // looking at existing siblings, which is a database read — so it belongs in
+  // this store action, not in the form. We use max(order)+1 rather than the
+  // sibling count so a future gap in ordering can never cause a collision.
+  //
+  // WHY refresh without going through loadGoalTree: loadGoalTree blanks the tree
+  // first (to avoid a stale-goal flash when navigating). Here we are refreshing
+  // the SAME goal already on screen, so we re-fetch and set in place — no loading
+  // flash, the new subgoal just appears.
+  addSubgoal: async (input) => {
+    const siblings = await getSubgoalsByGoalId(input.goalId)
+    const nextOrder =
+      siblings.length === 0
+        ? 0
+        : Math.max(...siblings.map((s) => s.order)) + 1
+
+    const subgoal = await createSubgoal({ ...input, order: nextOrder })
+
+    const tree = await getGoalTree(input.goalId)
+    set({ currentGoalTree: tree ?? null })
+
+    return subgoal
   },
 }))

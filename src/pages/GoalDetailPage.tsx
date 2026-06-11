@@ -7,13 +7,14 @@
 // layered-complexity rule there is deliberately no graph here; that is a later
 // phase. Lives in pages/ (route-level), pulling sub-parts from features/goals/.
 
-import type { ReactNode } from 'react'
+import { type ReactNode, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Plus } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { ROUTES, GOAL_CATEGORY_OPTIONS } from '@/core/constants'
 import { useGoalTree } from '@/core/hooks/useGoalTree'
 import { SubgoalSection } from '@/features/goals/SubgoalSection'
+import { SubgoalCreationModal } from '@/features/goals/SubgoalCreationModal'
 import type { Goal } from '@/core/types'
 
 function categoryLabel(value: Goal['category']): string {
@@ -26,6 +27,7 @@ export function GoalDetailPage() {
   // the (in practice unreachable) empty case.
   const { id = '' } = useParams<{ id: string }>()
   const { tree, isLoading } = useGoalTree(id)
+  const [isAddSubgoalOpen, setIsAddSubgoalOpen] = useState(false)
 
   if (isLoading) {
     return (
@@ -73,14 +75,33 @@ export function GoalDetailPage() {
 
       {/* Subgoals */}
       <div className="mt-8">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-app-text-muted">
-          Subgoals
-        </h2>
+        <div className="flex items-center justify-between gap-4">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-app-text-muted">
+            Subgoals
+          </h2>
+          <button
+            type="button"
+            onClick={() => setIsAddSubgoalOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-app-lg border border-app-border px-3 py-1.5 text-sm font-medium text-app-text transition hover:bg-app-border/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+          >
+            <Plus size={15} />
+            Add subgoal
+          </button>
+        </div>
 
         {subgoals.length === 0 ? (
-          <div className="mt-3 rounded-app-lg border border-dashed border-app-border bg-app-surface p-8 text-center text-sm text-app-text-muted">
-            No subgoals yet. Breaking this goal into subgoals comes next — they
-            will appear here once added.
+          <div className="mt-3 rounded-app-lg border border-dashed border-app-border bg-app-surface p-8 text-center">
+            <p className="text-sm text-app-text-muted">
+              No subgoals yet. Break this goal into the major parts it depends on.
+            </p>
+            <button
+              type="button"
+              onClick={() => setIsAddSubgoalOpen(true)}
+              className="mt-4 inline-flex items-center gap-1.5 rounded-app-lg bg-app-text px-4 py-2 text-sm font-semibold text-app-surface transition hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+            >
+              <Plus size={16} />
+              Add your first subgoal
+            </button>
           </div>
         ) : (
           <div className="mt-3 space-y-3">
@@ -93,6 +114,12 @@ export function GoalDetailPage() {
           </div>
         )}
       </div>
+
+      <SubgoalCreationModal
+        goalId={goal.id}
+        open={isAddSubgoalOpen}
+        onClose={() => setIsAddSubgoalOpen(false)}
+      />
     </section>
   )
 }

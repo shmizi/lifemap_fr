@@ -54,6 +54,12 @@ export const GOAL_CATEGORY_OPTIONS: ReadonlyArray<{
 export const DEFAULT_GOAL_STATUS: GoalStatus = 'active';
 export const DEFAULT_GOAL_PRIORITY: Priority = 'medium';
 
+// A new subgoal starts 'active' (parity with new goals). The Phase 1 creation
+// form asks only for title, description, and an optional target date; status,
+// requiresConsistency, and order are filled by the store/defaults until later
+// phases expose them.
+export const DEFAULT_SUBGOAL_STATUS: SubgoalStatus = 'active';
+
 // ─── Status & priority display labels (Phase 1) ──────────────────────────────
 // Map the canonical stored enum values to human-readable text, so display code
 // (the Goal Detail View, and later the dashboard) never hardcodes label strings.
