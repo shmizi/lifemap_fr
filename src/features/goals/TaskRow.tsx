@@ -1,33 +1,59 @@
-// TaskRow — a single task line.
+// TaskRow — a single task line: completion toggle, title, priority/date, and
+// (on hover/focus) edit + delete actions.
 //
-// READ-ONLY this session: the leading icon reflects completion status but does
-// NOT toggle yet. Toggling is a write (updateTask) that also needs the tree to
-// refresh, so it is scoped to the next session to keep this one a clean render.
-//
-// Lives in features/goals/ for now. Move it to components/ when a second screen
-// (e.g. the dashboard's "today" list) reuses it — not before (avoid premature
-// reuse abstractions).
+// Connected to the store for the toggle/edit/delete actions; it holds no
+// business logic. The leading icon toggles completion; RowActions opens the edit
+// modal or deletes. Safe to use buttons here because TaskRow is never inside a
+// link. The outer row is a `group` so RowActions can reveal on hover.
 
+import { useState } from 'react'
 import { Circle, CheckCircle2 } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import type { Task } from '@/core/types'
 import { PRIORITY_LABELS } from '@/core/constants'
+import { useGoalStore } from '@/store/useGoalStore'
+import { RowActions } from '@/components/ui/RowActions'
+import { TaskCreationModal } from '@/features/goals/TaskCreationModal'
 
 interface TaskRowProps {
   task: Task
 }
 
 export function TaskRow({ task }: TaskRowProps) {
+  const toggleTaskComplete = useGoalStore((s) => s.toggleTaskComplete)
+  const removeTask = useGoalStore((s) => s.removeTask)
+  const [isToggling, setIsToggling] = useState(false)
+  const [isEditOpen, setIsEditOpen] = useState(false)
+
   const isDone = task.status === 'completed'
-  // Only surface priority when it is high enough to matter, so routine tasks
-  // stay visually quiet (calm-by-default UX).
   const showPriority = task.priority === 'high' || task.priority === 'critical'
 
+  async function handleToggle() {
+    if (isToggling) return
+    setIsToggling(true)
+    try {
+      await toggleTaskComplete(task)
+    } finally {
+      setIsToggling(false)
+    }
+  }
+
   return (
-    <div className="flex items-center gap-2.5 rounded-md px-1 py-1">
-      <span className="shrink-0 text-app-text-muted" aria-hidden="true">
+    <div className="group flex items-center gap-2.5 rounded-md px-1 py-1">
+      <button
+        type="button"
+        onClick={handleToggle}
+        disabled={isToggling}
+        aria-pressed={isDone}
+        aria-label={
+          isDone ? 'Mark task as not complete' : 'Mark task as complete'
+        }
+        className={`shrink-0 rounded-full transition hover:text-app-text focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30 disabled:opacity-50 ${
+          isDone ? 'text-app-text' : 'text-app-text-muted'
+        }`}
+      >
         {isDone ? <CheckCircle2 size={16} /> : <Circle size={16} />}
-      </span>
+      </button>
 
       <span
         className={
@@ -50,6 +76,18 @@ export function TaskRow({ task }: TaskRowProps) {
           {format(parseISO(task.dueDate), 'd MMM')}
         </span>
       ) : null}
+
+      <RowActions
+        entityLabel="task"
+        onEdit={() => setIsEditOpen(true)}
+        onDelete={() => removeTask(task.id)}
+      />
+
+      <TaskCreationModal
+        task={task}
+        open={isEditOpen}
+        onClose={() => setIsEditOpen(false)}
+      />
     </div>
   )
 }

@@ -1,53 +1,53 @@
-// SubgoalCreationModal — the form for adding a subgoal to a goal.
+// SubgoalCreationModal — create OR edit a subgoal.
 //
-// Self-contained (overlay + panel + form), mirroring GoalCreationModal. This is
-// the second modal in the app; once milestone/task modals also exist, the shared
-// shell will be extracted into components/ui/Modal in one refactor. Until then,
-// keeping this consistent with the existing modal is the lower-risk choice.
-//
-// Form state is plain local React state. The write is delegated to the store's
-// addSubgoal action — the component never touches the database or computes the
-// subgoal's order itself.
+// Pass `subgoal` to edit it; pass `goalId` to create a new one under that goal.
+// Self-contained shell, consistent with the other modals. Writes go through the
+// store's addSubgoal / editSubgoal actions (the store owns `order`).
 
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { X } from 'lucide-react'
-import type { ID } from '@/core/types'
+import type { ID, Subgoal } from '@/core/types'
 import { DEFAULT_SUBGOAL_STATUS } from '@/core/constants'
-import { useGoalStore, type NewSubgoalInput } from '@/store/useGoalStore'
+import { useGoalStore } from '@/store/useGoalStore'
 
 interface SubgoalCreationModalProps {
-  goalId: ID
   open: boolean
   onClose: () => void
+  goalId?: ID // required in create mode
+  subgoal?: Subgoal // present => edit mode
 }
 
 const inputClass =
   'w-full rounded-app-lg border border-app-border bg-app-surface px-3 py-2 text-sm text-app-text placeholder:text-app-text-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30'
 
 export function SubgoalCreationModal({
-  goalId,
   open,
   onClose,
+  goalId,
+  subgoal,
 }: SubgoalCreationModalProps) {
   const addSubgoal = useGoalStore((s) => s.addSubgoal)
+  const editSubgoal = useGoalStore((s) => s.editSubgoal)
+  const isEdit = subgoal !== undefined
 
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [targetDate, setTargetDate] = useState('')
   const [isSaving, setIsSaving] = useState(false)
 
-  const canSave = title.trim().length > 0 && !isSaving
+  useEffect(() => {
+    if (!open) return
+    setTitle(subgoal?.title ?? '')
+    setDescription(subgoal?.description ?? '')
+    setTargetDate(subgoal?.targetDate ?? '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
 
-  function reset() {
-    setTitle('')
-    setDescription('')
-    setTargetDate('')
-  }
+  const canSave = title.trim().length > 0 && !isSaving
 
   function handleClose() {
     if (isSaving) return
-    reset()
     onClose()
   }
 
@@ -55,18 +55,24 @@ export function SubgoalCreationModal({
     if (!canSave) return
     setIsSaving(true)
     try {
-      // Build the input; only include targetDate when one was entered, so we
-      // never write an explicit `undefined` (keeps strict optional types happy).
-      const input: NewSubgoalInput = {
-        goalId,
-        title: title.trim(),
-        description: description.trim(),
-        status: DEFAULT_SUBGOAL_STATUS,
-        requiresConsistency: false,
-        ...(targetDate ? { targetDate } : {}),
+      if (isEdit && subgoal) {
+        // Edit patches only these fields; status / requiresConsistency / order
+        // are left untouched. targetDate || undefined lets a cleared date persist.
+        await editSubgoal(subgoal.id, {
+          title: title.trim(),
+          description: description.trim(),
+          targetDate: targetDate || undefined,
+        })
+      } else {
+        await addSubgoal({
+          goalId: goalId ?? '',
+          title: title.trim(),
+          description: description.trim(),
+          status: DEFAULT_SUBGOAL_STATUS,
+          requiresConsistency: false,
+          ...(targetDate ? { targetDate } : {}),
+        })
       }
-      await addSubgoal(input)
-      reset()
       onClose()
     } finally {
       setIsSaving(false)
@@ -92,7 +98,7 @@ export function SubgoalCreationModal({
           <motion.div
             role="dialog"
             aria-modal="true"
-            aria-label="Add a subgoal"
+            aria-label={isEdit ? 'Edit subgoal' : 'Add a subgoal'}
             className="relative w-full max-w-lg rounded-app-lg border border-app-border bg-app-surface p-6 shadow-xl"
             initial={{ opacity: 0, scale: 0.97, y: 8 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -104,7 +110,7 @@ export function SubgoalCreationModal({
           >
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold text-app-text">
-                Add a subgoal
+                {isEdit ? 'Edit subgoal' : 'Add a subgoal'}
               </h2>
               <button
                 type="button"
@@ -162,7 +168,7 @@ export function SubgoalCreationModal({
                 disabled={!canSave}
                 className="rounded-app-lg bg-app-text px-4 py-2 text-sm font-semibold text-app-surface transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
               >
-                {isSaving ? 'Saving...' : 'Add subgoal'}
+                {isSaving ? 'Saving...' : isEdit ? 'Save changes' : 'Add subgoal'}
               </button>
             </div>
           </motion.div>

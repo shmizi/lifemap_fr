@@ -60,6 +60,28 @@ export const DEFAULT_GOAL_PRIORITY: Priority = 'medium';
 // phases expose them.
 export const DEFAULT_SUBGOAL_STATUS: SubgoalStatus = 'active';
 
+// A new milestone defaults to 'active' (available to work on). 'locked' is
+// reserved for dependency-gated milestones, which the dependency engine sets
+// automatically in Phase 3 — not something the user picks at creation.
+export const DEFAULT_MILESTONE_STATUS: MilestoneStatus = 'active';
+
+// A new task starts 'pending' at 'medium' priority, not recurring. The creation
+// form lets the user override priority and set a due date; the rest default.
+export const DEFAULT_TASK_STATUS: TaskStatus = 'pending';
+export const DEFAULT_TASK_PRIORITY: Priority = 'medium';
+
+// Ordered options for the priority <select> (low -> critical). Kept as an array
+// (not derived from PRIORITY_LABELS) so the display order is explicit.
+export const PRIORITY_OPTIONS: ReadonlyArray<{
+  value: Priority;
+  label: string;
+}> = [
+  { value: 'low',      label: 'Low' },
+  { value: 'medium',   label: 'Medium' },
+  { value: 'high',     label: 'High' },
+  { value: 'critical', label: 'Critical' },
+];
+
 // ─── Status & priority display labels (Phase 1) ──────────────────────────────
 // Map the canonical stored enum values to human-readable text, so display code
 // (the Goal Detail View, and later the dashboard) never hardcodes label strings.

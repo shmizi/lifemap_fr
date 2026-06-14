@@ -9,12 +9,13 @@
 
 import { type ReactNode, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, Plus } from 'lucide-react'
+import { ArrowLeft, Plus, Pencil } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { ROUTES, GOAL_CATEGORY_OPTIONS } from '@/core/constants'
 import { useGoalTree } from '@/core/hooks/useGoalTree'
 import { SubgoalSection } from '@/features/goals/SubgoalSection'
 import { SubgoalCreationModal } from '@/features/goals/SubgoalCreationModal'
+import { GoalCreationModal } from '@/features/goals/GoalCreationModal'
 import type { Goal } from '@/core/types'
 
 function categoryLabel(value: Goal['category']): string {
@@ -28,6 +29,7 @@ export function GoalDetailPage() {
   const { id = '' } = useParams<{ id: string }>()
   const { tree, isLoading } = useGoalTree(id)
   const [isAddSubgoalOpen, setIsAddSubgoalOpen] = useState(false)
+  const [isEditGoalOpen, setIsEditGoalOpen] = useState(false)
 
   if (isLoading) {
     return (
@@ -59,9 +61,19 @@ export function GoalDetailPage() {
       <header className="mt-4 rounded-app-lg border border-app-border bg-app-surface p-6">
         <div className="flex items-start justify-between gap-3">
           <h1 className="text-2xl font-semibold text-app-text">{goal.title}</h1>
-          <span className="shrink-0 rounded-full border border-app-border px-2.5 py-0.5 text-xs text-app-text-muted">
-            {categoryLabel(goal.category)}
-          </span>
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="rounded-full border border-app-border px-2.5 py-0.5 text-xs text-app-text-muted">
+              {categoryLabel(goal.category)}
+            </span>
+            <button
+              type="button"
+              onClick={() => setIsEditGoalOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-app-lg border border-app-border px-3 py-1.5 text-sm font-medium text-app-text transition hover:bg-app-border/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+            >
+              <Pencil size={14} />
+              Edit
+            </button>
+          </div>
         </div>
 
         {goal.description ? (
@@ -119,6 +131,13 @@ export function GoalDetailPage() {
         goalId={goal.id}
         open={isAddSubgoalOpen}
         onClose={() => setIsAddSubgoalOpen(false)}
+      />
+
+      {/* Edit THIS goal. */}
+      <GoalCreationModal
+        goal={goal}
+        open={isEditGoalOpen}
+        onClose={() => setIsEditGoalOpen(false)}
       />
     </section>
   )

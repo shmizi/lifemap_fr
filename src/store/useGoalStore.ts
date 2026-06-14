@@ -1,40 +1,58 @@
-// Goal store — the single place the UI reads goal-list and goal-tree state from.
+// Goal store — the single place the UI reads goal-list and goal-tree state from,
+// and the only place (besides repositories) that orchestrates writes.
 //
-// WHY this now holds data and not just a selected id:
-// The locked data flow is Database -> Repositories -> Store action -> Hook -> UI.
-// UI components must never import a repository directly, so the store is where
-// repository calls are kicked off and their results are cached for the UI to read.
+// Locked data flow: Database -> Repositories -> Store action -> Hook -> UI.
+// UI components never import a repository directly; they call these actions.
 //
-// Scope is kept deliberately small (per the architecture rules):
+// State kept deliberately small:
 //   - goals[]          : the flat list shown on the Goals page
 //   - selectedGoalId   : which goal the user is focused on
 //   - currentGoalTree  : the assembled read-only tree for the Goal Detail View
-// No derived / health / priority values are stored here — those are computed in
-// the engine layer in later phases, never cached as state.
+// No derived/health/priority values are cached here — those are engine concerns
+// in later phases.
 
 import { create } from 'zustand'
-import type { Goal, Subgoal, GoalTree, ID } from '@/core/types'
+import type { Goal, Subgoal, Milestone, Task, GoalTree, ID } from '@/core/types'
 import {
   getAllGoals,
   createGoal,
+  updateGoal,
   deleteGoal,
   getGoalTree,
   getSubgoalsByGoalId,
   createSubgoal,
+  updateSubgoal,
+  deleteSubgoal,
+  getMilestonesBySubgoalId,
+  createMilestone,
+  updateMilestone,
+  deleteMilestone,
+  getTasksBySubgoalId,
+  createTask,
+  updateTask,
+  deleteTask,
 } from '@/database/repositories'
 
-// The shape of a brand-new goal as supplied by the creation form. The repository
-// owns id + timestamps, so the caller never provides them.
+// ── "New X" input shapes (creation forms) ───────────────────────────────────
+// The repository owns id + timestamps; the store action owns `order` where the
+// entity has one. So the form supplies neither id/timestamps nor order.
 export type NewGoalInput = Omit<Goal, 'id' | 'createdAt' | 'updatedAt'>
-
-// The shape of a brand-new subgoal as supplied by the creation form. The
-// repository owns id + timestamps; the store action owns `order` (it needs to
-// look at existing siblings to compute the next position), so the form supplies
-// neither of those.
 export type NewSubgoalInput = Omit<
   Subgoal,
   'id' | 'createdAt' | 'updatedAt' | 'order'
 >
+export type NewMilestoneInput = Omit<Milestone, 'id' | 'createdAt' | 'order'>
+export type NewTaskInput = Omit<Task, 'id' | 'createdAt' | 'updatedAt' | 'order'>
+
+// ── "Changes" shapes (edit forms) ───────────────────────────────────────────
+// Patchable fields only; immutable id/timestamps are excluded (repositories
+// manage timestamps). Each is assignable to its repository's update() parameter.
+export type GoalChanges = Partial<Omit<Goal, 'id' | 'createdAt' | 'updatedAt'>>
+export type SubgoalChanges = Partial<
+  Omit<Subgoal, 'id' | 'createdAt' | 'updatedAt'>
+>
+export type MilestoneChanges = Partial<Omit<Milestone, 'id' | 'createdAt'>>
+export type TaskChanges = Partial<Omit<Task, 'id' | 'createdAt' | 'updatedAt'>>
 
 interface GoalState {
   // --- goal list ---
@@ -42,6 +60,7 @@ interface GoalState {
   isLoadingGoals: boolean
   loadGoals: () => Promise<void>
   addGoal: (input: NewGoalInput) => Promise<Goal>
+  editGoal: (id: ID, changes: GoalChanges) => Promise<void>
   removeGoal: (id: ID) => Promise<void>
 
   // --- selection ---
@@ -53,98 +72,165 @@ interface GoalState {
   currentGoalTree: GoalTree | null
   isLoadingTree: boolean
   loadGoalTree: (id: ID) => Promise<void>
+
   addSubgoal: (input: NewSubgoalInput) => Promise<Subgoal>
+  editSubgoal: (id: ID, changes: SubgoalChanges) => Promise<void>
+  removeSubgoal: (id: ID) => Promise<void>
+
+  addMilestone: (input: NewMilestoneInput) => Promise<Milestone>
+  editMilestone: (id: ID, changes: MilestoneChanges) => Promise<void>
+  removeMilestone: (id: ID) => Promise<void>
+
+  addTask: (input: NewTaskInput) => Promise<Task>
+  editTask: (id: ID, changes: TaskChanges) => Promise<void>
+  removeTask: (id: ID) => Promise<void>
+  toggleTaskComplete: (task: Task) => Promise<void>
 }
 
-export const useGoalStore = create<GoalState>()((set) => ({
-  // --- goal list ---
-  goals: [],
-  isLoadingGoals: false,
-
-  // WHY refetch the whole list instead of mutating in place: the list is tiny
-  // (one user's goals) and getAllGoals already returns them newest-first, so a
-  // reload is simpler and guarantees the order/contents match the database
-  // exactly rather than us keeping a parallel copy in sync.
-  loadGoals: async () => {
-    set({ isLoadingGoals: true })
-    try {
-      const goals = await getAllGoals()
-      set({ goals })
-    } finally {
-      set({ isLoadingGoals: false })
-    }
-  },
-
-  // Create then reload, so the new goal lands in the same sorted position the
-  // database would give it. Returns the created goal so the caller (the modal)
-  // can react — e.g. close itself or select the new goal.
-  addGoal: async (input) => {
-    const goal = await createGoal(input)
-    const goals = await getAllGoals()
-    set({ goals })
-    return goal
-  },
-
-  // Delete a goal, then reload the list so the UI reflects the removal.
-  // TODO(Phase 3): cascade cleanup. deleteGoal is a plain delete per the repo
-  // convention — it removes ONLY the goal row, not its subgoals/milestones/tasks.
-  // Safe today because no subgoal-creation UI exists yet, so a goal has no
-  // children to orphan. Once subgoals can be created, this action (or the
-  // repository) must also remove the goal's descendants and dependencies.
-  removeGoal: async (id) => {
-    await deleteGoal(id)
-    const goals = await getAllGoals()
-    set({ goals })
-  },
-
-  // --- selection ---
-  selectedGoalId: null,
-  setSelectedGoalId: (id) => set({ selectedGoalId: id }),
-  clearSelectedGoal: () => set({ selectedGoalId: null }),
-
-  // --- goal tree ---
-  currentGoalTree: null,
-  isLoadingTree: false,
-
-  // Establishes the Repository -> Store -> Hook -> UI path the Detail View (next
-  // session) will use. We clear the previous tree before loading so a stale tree
-  // from a different goal never flashes while the new one is in flight.
-  // getGoalTree returns undefined for an unknown id; we normalise that to null.
-  loadGoalTree: async (id) => {
-    set({ isLoadingTree: true, currentGoalTree: null })
-    try {
-      const tree = await getGoalTree(id)
+export const useGoalStore = create<GoalState>()((set, get) => {
+  // Re-fetch the on-screen goal's tree in place (no loading flash). Called after
+  // any subgoal/milestone/task mutation so the Detail View reflects it. Reads
+  // the goal id from the currently-loaded tree, since every such mutation
+  // happens while that goal is on screen.
+  const refreshCurrentTree = async () => {
+    const goalId = get().currentGoalTree?.goal.id
+    if (goalId) {
+      const tree = await getGoalTree(goalId)
       set({ currentGoalTree: tree ?? null })
-    } finally {
-      set({ isLoadingTree: false })
     }
-  },
+  }
 
-  // Create a subgoal under a goal, then refresh the assembled tree in place so
-  // the Goal Detail View shows it immediately.
-  //
-  // WHY compute `order` here: createSubgoal makes the caller own `order` (a
-  // subgoal needs a display position). Deciding the next position requires
-  // looking at existing siblings, which is a database read — so it belongs in
-  // this store action, not in the form. We use max(order)+1 rather than the
-  // sibling count so a future gap in ordering can never cause a collision.
-  //
-  // WHY refresh without going through loadGoalTree: loadGoalTree blanks the tree
-  // first (to avoid a stale-goal flash when navigating). Here we are refreshing
-  // the SAME goal already on screen, so we re-fetch and set in place — no loading
-  // flash, the new subgoal just appears.
-  addSubgoal: async (input) => {
-    const siblings = await getSubgoalsByGoalId(input.goalId)
-    const nextOrder =
-      siblings.length === 0
-        ? 0
-        : Math.max(...siblings.map((s) => s.order)) + 1
+  // Next display position among a set of siblings: max(order)+1, which is
+  // collision-proof even if the existing orders have gaps.
+  const nextOrder = (orders: number[]): number =>
+    orders.length === 0 ? 0 : Math.max(...orders) + 1
 
-    const subgoal = await createSubgoal({ ...input, order: nextOrder })
+  return {
+    // --- goal list ---
+    goals: [],
+    isLoadingGoals: false,
 
-    const tree = await getGoalTree(input.goalId)
-    set({ currentGoalTree: tree ?? null })
+    loadGoals: async () => {
+      set({ isLoadingGoals: true })
+      try {
+        set({ goals: await getAllGoals() })
+      } finally {
+        set({ isLoadingGoals: false })
+      }
+    },
 
-    return subgoal
-  },
-}))
+    addGoal: async (input) => {
+      const goal = await createGoal(input)
+      set({ goals: await getAllGoals() })
+      return goal
+    },
+
+    editGoal: async (id, changes) => {
+      await updateGoal(id, changes)
+      set({ goals: await getAllGoals() })
+      // If this goal is the one open in the Detail View, refresh its tree too.
+      if (get().currentGoalTree?.goal.id === id) await refreshCurrentTree()
+    },
+
+    // TODO(Phase 3): cascade. deleteGoal removes only the goal row, not its
+    // descendants/dependencies. Safe to leave until the dependency engine exists.
+    removeGoal: async (id) => {
+      await deleteGoal(id)
+      set({ goals: await getAllGoals() })
+    },
+
+    // --- selection ---
+    selectedGoalId: null,
+    setSelectedGoalId: (id) => set({ selectedGoalId: id }),
+    clearSelectedGoal: () => set({ selectedGoalId: null }),
+
+    // --- goal tree ---
+    currentGoalTree: null,
+    isLoadingTree: false,
+
+    // Blanks the tree first (avoids a stale-goal flash when navigating between
+    // detail pages); in-place refreshes after a mutation use refreshCurrentTree.
+    loadGoalTree: async (id) => {
+      set({ isLoadingTree: true, currentGoalTree: null })
+      try {
+        const tree = await getGoalTree(id)
+        set({ currentGoalTree: tree ?? null })
+      } finally {
+        set({ isLoadingTree: false })
+      }
+    },
+
+    // --- subgoals ---
+    addSubgoal: async (input) => {
+      const siblings = await getSubgoalsByGoalId(input.goalId)
+      const order = nextOrder(siblings.map((s) => s.order))
+      const subgoal = await createSubgoal({ ...input, order })
+      await refreshCurrentTree()
+      return subgoal
+    },
+    editSubgoal: async (id, changes) => {
+      await updateSubgoal(id, changes)
+      await refreshCurrentTree()
+    },
+    // TODO(Phase 3): cascade delete milestones + tasks under this subgoal.
+    removeSubgoal: async (id) => {
+      await deleteSubgoal(id)
+      await refreshCurrentTree()
+    },
+
+    // --- milestones ---
+    addMilestone: async (input) => {
+      const siblings = await getMilestonesBySubgoalId(input.subgoalId)
+      const order = nextOrder(siblings.map((m) => m.order))
+      const milestone = await createMilestone({ ...input, order })
+      await refreshCurrentTree()
+      return milestone
+    },
+    editMilestone: async (id, changes) => {
+      await updateMilestone(id, changes)
+      await refreshCurrentTree()
+    },
+    // TODO(Phase 3): cascade delete tasks under this milestone.
+    removeMilestone: async (id) => {
+      await deleteMilestone(id)
+      await refreshCurrentTree()
+    },
+
+    // --- tasks ---
+    addTask: async (input) => {
+      // A task's order is scoped to its group: same milestoneId (including both
+      // undefined for loose tasks). Partition the subgoal's tasks accordingly.
+      const subgoalTasks = await getTasksBySubgoalId(input.subgoalId)
+      const groupOrders = subgoalTasks
+        .filter((t) => t.milestoneId === input.milestoneId)
+        .map((t) => t.order)
+      const order = nextOrder(groupOrders)
+      const task = await createTask({ ...input, order })
+      await refreshCurrentTree()
+      return task
+    },
+    editTask: async (id, changes) => {
+      await updateTask(id, changes)
+      await refreshCurrentTree()
+    },
+    removeTask: async (id) => {
+      await deleteTask(id)
+      await refreshCurrentTree()
+    },
+
+    // Flip a task between completed and pending. Completing stamps completedAt
+    // (feeds reviews/streaks later); un-completing clears it so a pending task
+    // never carries a stale completion time. Binary only — Phase 1 has no UI for
+    // in_progress/skipped.
+    toggleTaskComplete: async (task) => {
+      const markingComplete = task.status !== 'completed'
+      await updateTask(
+        task.id,
+        markingComplete
+          ? { status: 'completed', completedAt: new Date().toISOString() }
+          : { status: 'pending', completedAt: undefined },
+      )
+      await refreshCurrentTree()
+    },
+  }
+})
