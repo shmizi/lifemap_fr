@@ -2,12 +2,11 @@
 //
 // Pass `task` to edit it. To create: pass subgoalId (always) and milestoneId
 // (only when the task sits under a specific milestone; omit for a loose task).
-// Writes go through addTask / editTask (the store owns order). Edit patches only
+// The overlay/panel shell now lives in the shared <Modal> component. Writes go
+// through addTask / editTask (the store owns order). Edit patches only
 // title/priority/dueDate/description — status, completedAt, etc. are preserved.
 
 import { useEffect, useState, type ReactNode } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
-import { X } from 'lucide-react'
 import type { ID, Priority, Task } from '@/core/types'
 import {
   DEFAULT_TASK_STATUS,
@@ -15,6 +14,7 @@ import {
   PRIORITY_OPTIONS,
 } from '@/core/constants'
 import { useGoalStore } from '@/store/useGoalStore'
+import { Modal } from '@/components/ui/Modal'
 
 interface TaskCreationModalProps {
   open: boolean
@@ -90,117 +90,77 @@ export function TaskCreationModal({
   }
 
   return (
-    <AnimatePresence>
-      {open ? (
-        <motion.div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.15 }}
-        >
-          <div
-            className="absolute inset-0 bg-black/30 backdrop-blur-sm"
-            onClick={handleClose}
-            aria-hidden="true"
+    <Modal
+      isOpen={open}
+      onClose={handleClose}
+      title={isEdit ? 'Edit task' : 'Add a task'}
+    >
+      <div className="mt-5 space-y-4">
+        <Field label="Title">
+          <input
+            autoFocus
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="e.g. Solve 3 Leetcode graph questions"
+            className={inputClass}
           />
+        </Field>
 
-          <motion.div
-            role="dialog"
-            aria-modal="true"
-            aria-label={isEdit ? 'Edit task' : 'Add a task'}
-            className="relative w-full max-w-lg rounded-app-lg border border-app-border bg-app-surface p-6 shadow-xl"
-            initial={{ opacity: 0, scale: 0.97, y: 8 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.97, y: 8 }}
-            transition={{ duration: 0.18 }}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') handleClose()
-            }}
-          >
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-app-text">
-                {isEdit ? 'Edit task' : 'Add a task'}
-              </h2>
-              <button
-                type="button"
-                onClick={handleClose}
-                aria-label="Close"
-                className="rounded-md p-1 text-app-text-muted transition hover:text-app-text focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
-              >
-                <X size={18} />
-              </button>
-            </div>
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Priority">
+            <select
+              value={priority}
+              onChange={(e) => setPriority(e.target.value as Priority)}
+              className={inputClass}
+            >
+              {PRIORITY_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </Field>
 
-            <div className="mt-5 space-y-4">
-              <Field label="Title">
-                <input
-                  autoFocus
-                  type="text"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="e.g. Solve 3 Leetcode graph questions"
-                  className={inputClass}
-                />
-              </Field>
+          <Field label="Due date (optional)">
+            <input
+              type="date"
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+              className={inputClass}
+            />
+          </Field>
+        </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <Field label="Priority">
-                  <select
-                    value={priority}
-                    onChange={(e) => setPriority(e.target.value as Priority)}
-                    className={inputClass}
-                  >
-                    {PRIORITY_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
+        <Field label="Description (optional)">
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={2}
+            placeholder="Any detail worth remembering"
+            className={`${inputClass} resize-none`}
+          />
+        </Field>
+      </div>
 
-                <Field label="Due date (optional)">
-                  <input
-                    type="date"
-                    value={dueDate}
-                    onChange={(e) => setDueDate(e.target.value)}
-                    className={inputClass}
-                  />
-                </Field>
-              </div>
-
-              <Field label="Description (optional)">
-                <textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  rows={2}
-                  placeholder="Any detail worth remembering"
-                  className={`${inputClass} resize-none`}
-                />
-              </Field>
-            </div>
-
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={handleClose}
-                className="rounded-app-lg border border-app-border px-4 py-2 text-sm font-medium text-app-text transition hover:bg-app-border/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={!canSave}
-                className="rounded-app-lg bg-app-text px-4 py-2 text-sm font-semibold text-app-surface transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
-              >
-                {isSaving ? 'Saving...' : isEdit ? 'Save changes' : 'Add task'}
-              </button>
-            </div>
-          </motion.div>
-        </motion.div>
-      ) : null}
-    </AnimatePresence>
+      <div className="mt-6 flex justify-end gap-3">
+        <button
+          type="button"
+          onClick={handleClose}
+          className="rounded-app-lg border border-app-border px-4 py-2 text-sm font-medium text-app-text transition hover:bg-app-border/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={!canSave}
+          className="rounded-app-lg bg-app-text px-4 py-2 text-sm font-semibold text-app-surface transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+        >
+          {isSaving ? 'Saving...' : isEdit ? 'Save changes' : 'Add task'}
+        </button>
+      </div>
+    </Modal>
   )
 }
 
