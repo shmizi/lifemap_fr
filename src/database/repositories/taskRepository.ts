@@ -78,10 +78,31 @@ export async function getTasksByStatus(status: TaskStatus): Promise<Task[]> {
 export async function getTasksByScheduledDate(scheduledDate: ISODate): Promise<Task[]> {
   // scheduledDate IS indexed → exact-match query. Tasks with no scheduledDate
   // are absent from this index and correctly excluded.
-  // NOTE: the Today dashboard may later range-query this index
-  // (where('scheduledDate').between(start, end)); that is out of scope here and
-  // not built yet — this getter only does exact equality.
   return db.tasks.where('scheduledDate').equals(scheduledDate).toArray();
+}
+
+export async function getTasksScheduledBetween(
+  start: ISODate,
+  end: ISODate,
+): Promise<Task[]> {
+  // scheduledDate IS indexed → range-query the index instead of scanning. The
+  // `true, true` flags make BOTH bounds inclusive, so a task scheduled exactly
+  // at `start` (e.g. local midnight) or exactly at `end` is included. Tasks with
+  // no scheduledDate are absent from this index and correctly excluded.
+  //
+  // Returned in scheduledDate-ascending order. We sort in memory because the
+  // index yields key order but `order` (the in-group display position) is not
+  // meaningful across a whole day; for a Today list, chronological is what the
+  // UI wants. ISO strings compare lexicographically, which is chronological.
+  // The `?? ''` only satisfies the optional type — every row here has a
+  // scheduledDate, since rows without one aren't in the index.
+  const tasks = await db.tasks
+    .where('scheduledDate')
+    .between(start, end, true, true)
+    .toArray();
+  return tasks.sort((a, b) =>
+    (a.scheduledDate ?? '').localeCompare(b.scheduledDate ?? ''),
+  );
 }
 
 export async function updateTask(id: ID, changes: UpdateTaskInput): Promise<void> {

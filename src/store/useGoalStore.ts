@@ -6,12 +6,14 @@
 //
 // State kept deliberately small:
 //   - goals[]          : the flat list shown on the Goals page
+//   - todaysTasks[]    : tasks scheduled for today, for the Dashboard
 //   - selectedGoalId   : which goal the user is focused on
 //   - currentGoalTree  : the assembled read-only tree for the Goal Detail View
 // No derived/health/priority values are cached here — those are engine concerns
 // in later phases.
 
 import { create } from 'zustand'
+import { startOfDay, endOfDay } from 'date-fns'
 import type { Goal, Subgoal, Milestone, Task, GoalTree, ID } from '@/core/types'
 import {
   getAllGoals,
@@ -31,6 +33,7 @@ import {
   createTask,
   updateTask,
   deleteTask,
+  getTasksScheduledBetween,
 } from '@/database/repositories'
 
 // ── "New X" input shapes (creation forms) ───────────────────────────────────
@@ -62,6 +65,11 @@ interface GoalState {
   addGoal: (input: NewGoalInput) => Promise<Goal>
   editGoal: (id: ID, changes: GoalChanges) => Promise<void>
   removeGoal: (id: ID) => Promise<void>
+
+  // --- today (dashboard) ---
+  todaysTasks: Task[]
+  isLoadingToday: boolean
+  loadTodaysTasks: () => Promise<void>
 
   // --- selection ---
   selectedGoalId: ID | null
@@ -137,6 +145,26 @@ export const useGoalStore = create<GoalState>()((set, get) => {
     removeGoal: async (id) => {
       await deleteGoal(id)
       set({ goals: await getAllGoals() })
+    },
+
+    // --- today (dashboard) ---
+    todaysTasks: [],
+    isLoadingToday: false,
+
+    // Load tasks scheduled for today, where "today" is the user's local day.
+    // date-fns startOfDay/endOfDay give local midnight and 23:59:59.999; we hand
+    // their ISO strings to the repository's range getter. No filtering/derived
+    // math here — the store just holds what the repo returns.
+    loadTodaysTasks: async () => {
+      set({ isLoadingToday: true })
+      try {
+        const now = new Date()
+        const start = startOfDay(now).toISOString()
+        const end = endOfDay(now).toISOString()
+        set({ todaysTasks: await getTasksScheduledBetween(start, end) })
+      } finally {
+        set({ isLoadingToday: false })
+      }
     },
 
     // --- selection ---
