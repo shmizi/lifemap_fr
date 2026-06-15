@@ -247,14 +247,6 @@ The project prioritizes:
 * debuggability
 * modular architecture
 
-### Strict Rules
-
-* No Redux
-* No premature backend
-* No microservices
-* No overengineering
-* No unnecessary abstractions
-
 ---
 
 # Current Status
