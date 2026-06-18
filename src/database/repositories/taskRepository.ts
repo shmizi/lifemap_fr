@@ -27,7 +27,7 @@ import type { ID, ISODate, Task, TaskStatus } from '@/core/types';
  * Fields the CALLER provides. id/createdAt/updatedAt are generated here, so they
  * are omitted. Required by the Task type: subgoalId, title, status, priority,
  * isRecurring, order. Optional: description, dueDate, scheduledDate,
- * estimatedMinutes, completedAt, milestoneId.
+ * estimatedMinutes, effort, completedAt, milestoneId.
  */
 export type CreateTaskInput = Omit<Task, 'id' | 'createdAt' | 'updatedAt'>;
 

@@ -23,10 +23,8 @@ import type {
   TaskLineage,
   ID,
 } from '@/core/types'
-import {
-  computeTodayProgress,
-  type TodayProgress,
-} from '@/engine/progress/computeTodayProgress'
+import { computeEffortMomentum } from '@/engine/progress/computeEffortMomentum'
+import type { Completion } from '@/engine/progress/computeCompletion'
 import {
   computeGoalProgress,
   type GoalProgress,
@@ -112,9 +110,10 @@ interface GoalState {
   // dashboard reads it to render each task's "Subgoal · Goal" context.
   // Refreshed in the same pass as the windows so a row and its lineage agree.
   taskLineages: Record<ID, TaskLineage>
-  // Momentum for today's scheduled tasks only, computed by the engine (never
-  // inline). Refreshed alongside todaysTasks; MomentumBar reads it.
-  todayProgress: TodayProgress
+  // Effort-based momentum for today's scheduled tasks ("how much work today",
+  // not "how many tasks"): completed/total are EFFORT UNITS, not counts. Computed
+  // by the engine (never inline) over todaysTasks; MomentumBar reads it.
+  todayEffort: Completion
   // A small focus list: the top-scored INCOMPLETE tasks across ALL goals, ranked
   // by the priority engine — independent of whether they are scheduled for today.
   // This is a different lens from todaysTasks (which is "what I planned today").
@@ -238,7 +237,7 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       todaysTasks,
       thisWeekTasks,
       taskLineages,
-      todayProgress: computeTodayProgress(todaysTasks),
+      todayEffort: computeEffortMomentum(todaysTasks),
     })
   }
 
@@ -340,7 +339,7 @@ export const useGoalStore = create<GoalState>()((set, get) => {
     todaysTasks: [],
     thisWeekTasks: [],
     taskLineages: {},
-    todayProgress: { completed: 0, total: 0, percent: 0 },
+    todayEffort: { completed: 0, total: 0, percent: 0 },
     topPriorityTasks: [],
     isLoadingDashboard: false,
 
