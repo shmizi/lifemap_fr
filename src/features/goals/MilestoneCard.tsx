@@ -22,29 +22,39 @@ const CELEBRATION_MS = 1400
 
 interface MilestoneCardProps {
   data: MilestoneTree
+  // True when this milestone completed while its section was COLLAPSED: the card
+  // wasn't mounted to catch the live transition, so it should play the flourish
+  // as it appears (on re-expand). SubgoalSection decides this.
+  celebrateOnAppear?: boolean
 }
 
-export function MilestoneCard({ data }: MilestoneCardProps) {
+export function MilestoneCard({
+  data,
+  celebrateOnAppear = false,
+}: MilestoneCardProps) {
   const { milestone, tasks } = data
   const removeMilestone = useGoalStore((s) => s.removeMilestone)
   const [isAddTaskOpen, setIsAddTaskOpen] = useState(false)
   const [isEditOpen, setIsEditOpen] = useState(false)
 
-  // Play the celebration only on a LIVE active -> completed transition (when the
-  // auto-completion rule flips this milestone), never on first render of an
-  // already-completed milestone. The ref seeds with the current status so a
-  // milestone that mounts completed does not celebrate.
+  // Seed `celebrate` from celebrateOnAppear so a milestone that completed while
+  // hidden plays its flourish the moment it mounts. The ref seeds with the
+  // current status so an already-completed milestone never celebrates on its own.
   const prevStatus = useRef(milestone.status)
-  const [celebrate, setCelebrate] = useState(false)
+  const [celebrate, setCelebrate] = useState(celebrateOnAppear)
+
+  // Clear the flourish after it has played, whichever path started it.
   useEffect(() => {
-    if (
-      milestone.status === 'completed' &&
-      prevStatus.current !== 'completed'
-    ) {
+    if (!celebrate) return
+    const timer = setTimeout(() => setCelebrate(false), CELEBRATION_MS)
+    return () => clearTimeout(timer)
+  }, [celebrate])
+
+  // Catch a LIVE active -> completed transition (section expanded, the auto-
+  // completion rule just flipped this milestone).
+  useEffect(() => {
+    if (milestone.status === 'completed' && prevStatus.current !== 'completed') {
       setCelebrate(true)
-      const timer = setTimeout(() => setCelebrate(false), CELEBRATION_MS)
-      prevStatus.current = milestone.status
-      return () => clearTimeout(timer)
     }
     prevStatus.current = milestone.status
   }, [milestone.status])

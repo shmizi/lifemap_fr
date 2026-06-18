@@ -13,6 +13,8 @@ import { ArrowLeft, Plus, Pencil } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { ROUTES, GOAL_CATEGORY_OPTIONS } from '@/core/constants'
 import { useGoalTree } from '@/core/hooks/useGoalTree'
+import { useGoalStore } from '@/store/useGoalStore'
+import { ProgressRing } from '@/components/progress/ProgressRing'
 import { SubgoalSection } from '@/features/goals/SubgoalSection'
 import { SubgoalCreationModal } from '@/features/goals/SubgoalCreationModal'
 import { GoalCreationModal } from '@/features/goals/GoalCreationModal'
@@ -28,6 +30,9 @@ export function GoalDetailPage() {
   // the (in practice unreachable) empty case.
   const { id = '' } = useParams<{ id: string }>()
   const { tree, isLoading } = useGoalTree(id)
+  // Whole-goal momentum, derived from the same tree by the store. Shown in the
+  // header above the per-subgoal rings; hidden until the goal has tasks.
+  const goalProgress = useGoalStore((s) => s.currentGoalProgress)
   const [isAddSubgoalOpen, setIsAddSubgoalOpen] = useState(false)
   const [isEditGoalOpen, setIsEditGoalOpen] = useState(false)
 
@@ -78,6 +83,22 @@ export function GoalDetailPage() {
 
         {goal.description ? (
           <p className="mt-3 text-sm text-app-text-muted">{goal.description}</p>
+        ) : null}
+
+        {/* Whole-goal momentum — the calm ring mirrors the per-subgoal rings
+            below it. Hidden when the goal has no tasks (nothing to show yet). */}
+        {goalProgress.total > 0 ? (
+          <div className="mt-4 flex items-center gap-3">
+            <ProgressRing
+              percent={goalProgress.percent}
+              size={48}
+              strokeWidth={5}
+              ariaLabel={`${goalProgress.completed} of ${goalProgress.total} tasks complete`}
+            />
+            <span className="text-sm text-app-text-muted">
+              {goalProgress.completed} of {goalProgress.total} tasks done
+            </span>
+          </div>
         ) : null}
 
         <p className="mt-4 text-xs text-app-text-muted">
