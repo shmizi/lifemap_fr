@@ -11,6 +11,7 @@
 import { useEffect } from 'react'
 import { useGoalStore } from '@/store/useGoalStore'
 import { MomentumBar } from '@/components/progress/MomentumBar'
+import { PriorityTaskPanel } from '@/components/priority/PriorityTaskPanel'
 import { DashboardTaskSection } from '@/features/dashboard/DashboardTaskSection'
 
 export function DashboardPage() {
@@ -19,6 +20,7 @@ export function DashboardPage() {
   const thisWeekTasks = useGoalStore((s) => s.thisWeekTasks)
   const taskLineages = useGoalStore((s) => s.taskLineages)
   const todayProgress = useGoalStore((s) => s.todayProgress)
+  const topPriorityTasks = useGoalStore((s) => s.topPriorityTasks)
   const isLoadingDashboard = useGoalStore((s) => s.isLoadingDashboard)
   const loadDashboard = useGoalStore((s) => s.loadDashboard)
 
@@ -40,6 +42,11 @@ export function DashboardPage() {
           total={todayProgress.total}
           percent={todayProgress.percent}
         />
+
+        {/* A focus suggestion drawn from ALL goals (not just today's schedule),
+            placed right under the momentum bar. Hidden when there is nothing to
+            focus on. */}
+        <PriorityTaskPanel tasks={topPriorityTasks} />
 
         {/* Overdue is hidden when empty — being caught up should feel clean,
             not like an empty to-do box. */}
