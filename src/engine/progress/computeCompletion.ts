@@ -2,10 +2,10 @@
 //
 // PURE TypeScript: no React, no DB, no store. Given any set of tasks, it reports
 // how many are completed as { completed, total, percent }. Every completion view
-// in the app — a day's scheduled tasks, a whole goal, a single subgoal — is the
-// SAME math, so it lives here once. The domain-named wrappers
-// (computeTodayProgress / computeGoalProgress / computeSubgoalProgress) are thin
-// aliases over this, kept so call sites read in their own terms.
+// in the app — a whole goal, a single subgoal — is the SAME math, so it lives
+// here once. The domain-named wrappers (computeGoalProgress /
+// computeSubgoalProgress) are thin aliases over this, kept so call sites read in
+// their own terms.
 
 import type { Task } from '@/core/types'
 

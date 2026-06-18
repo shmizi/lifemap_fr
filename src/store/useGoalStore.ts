@@ -264,33 +264,52 @@ export const useGoalStore = create<GoalState>()((set, get) => {
     })
   }
 
+  // Gather every goal paired with its tasks, composing the existing getters
+  // (getAllGoals + getTasksByGoalId). Single source for the two consumers below
+  // (per-goal progress AND the flat priority list), so the composition lives in
+  // one place. NOTE: this deliberately reaches tasks only via live goals, so a
+  // task orphaned by a non-cascading goal/subgoal delete is excluded — same as
+  // before. (Weekly Review intentionally uses getAllTasks() for ALL rows; this
+  // is a different, goal-scoped view and must stay so.)
+  const gatherGoalsWithTasks = async (): Promise<
+    { goal: Goal; tasks: Task[] }[]
+  > => {
+    const goals = await getAllGoals()
+    return Promise.all(
+      goals.map(async (goal) => ({
+        goal,
+        tasks: await getTasksByGoalId(goal.id),
+      })),
+    )
+  }
+
   // Reload the goal list and recompute each goal's task-completion progress in
   // one pass, then set both together so a card and its ring never disagree. The
   // per-goal task fetch + engine math is the only place goalProgress is built;
   // every goal-list mutation routes through here. Cheap at this scale (tiny
   // tables); revisit if the goal/task counts ever grow large.
   const refreshGoalsAndProgress = async () => {
-    const goals = await getAllGoals()
-    const entries = await Promise.all(
-      goals.map(async (goal): Promise<[ID, GoalProgress]> => {
-        const tasks = await getTasksByGoalId(goal.id)
-        return [goal.id, computeGoalProgress(tasks)]
-      }),
-    )
-    set({ goals, goalProgress: Object.fromEntries(entries) })
+    const goalsWithTasks = await gatherGoalsWithTasks()
+    set({
+      goals: goalsWithTasks.map((g) => g.goal),
+      goalProgress: Object.fromEntries(
+        goalsWithTasks.map((g): [ID, GoalProgress] => [
+          g.goal.id,
+          computeGoalProgress(g.tasks),
+        ]),
+      ),
+    })
   }
 
   // Recompute the dashboard's top-priority focus list. It ranks EVERY incomplete
-  // task across ALL goals, so it gathers them by composing the existing getters
-  // (getAllGoals + getTasksByGoalId) — no new repository query. rankTasks does
-  // the scoring/sorting/top-N; the store never ranks inline. `new Date()` is read
-  // once here so the whole list is scored against a single consistent "now".
+  // task across ALL goals, gathered via gatherGoalsWithTasks (goal-scoped, no new
+  // repository query). rankTasks does the scoring/sorting/top-N; the store never
+  // ranks inline. `new Date()` is read once here so the whole list is scored
+  // against a single consistent "now".
   const refreshTopPriority = async () => {
-    const goals = await getAllGoals()
-    const tasksPerGoal = await Promise.all(
-      goals.map((goal) => getTasksByGoalId(goal.id)),
-    )
-    set({ topPriorityTasks: rankTasks(tasksPerGoal.flat(), new Date()) })
+    const goalsWithTasks = await gatherGoalsWithTasks()
+    const allTasks = goalsWithTasks.flatMap((g) => g.tasks)
+    set({ topPriorityTasks: rankTasks(allTasks, new Date()) })
   }
 
   // Apply the milestone auto-completion rule after a task changes: a milestone
