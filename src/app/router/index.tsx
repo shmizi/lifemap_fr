@@ -4,7 +4,7 @@ import { DashboardPage } from '@/pages/DashboardPage'
 import { GoalsPage } from '@/pages/GoalsPage'
 import { GoalDetailPage } from '@/pages/GoalDetailPage'
 import { RoadmapPage } from '@/pages/RoadmapPage'
-import { ReviewsPage } from '@/pages/ReviewsPage'
+import { WeeklyReviewPage } from '@/pages/WeeklyReviewPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { ROUTES } from '@/core/constants'
 
@@ -19,7 +19,7 @@ export const router = createBrowserRouter([
       // '/goals/:id' by React Router's ranking, so order here is not fragile.
       { path: ROUTES.GOAL_DETAIL,  element: <GoalDetailPage /> },
       { path: ROUTES.ROADMAP,      element: <RoadmapPage /> },
-      { path: ROUTES.REVIEWS,      element: <ReviewsPage /> },
+      { path: ROUTES.REVIEWS,      element: <WeeklyReviewPage /> },
       { path: ROUTES.SETTINGS,     element: <SettingsPage /> },
     ],
   },

@@ -36,6 +36,10 @@ import {
 import { isMilestoneComplete } from '@/engine/progress/isMilestoneComplete'
 import { rankTasks } from '@/engine/priority/rankTasks'
 import {
+  computeWeeklyReview,
+  type WeeklyReviewData,
+} from '@/engine/review/computeWeeklyReview'
+import {
   getAllGoals,
   createGoal,
   updateGoal,
@@ -60,6 +64,7 @@ import {
   getTasksScheduledBefore,
   getTaskLineages,
   getTasksByGoalId,
+  getAllTasks,
 } from '@/database/repositories'
 
 // ── "New X" input shapes (creation forms) ───────────────────────────────────
@@ -82,6 +87,18 @@ export type SubgoalChanges = Partial<
 >
 export type MilestoneChanges = Partial<Omit<Milestone, 'id' | 'createdAt'>>
 export type TaskChanges = Partial<Omit<Task, 'id' | 'createdAt' | 'updatedAt'>>
+
+// ── Weekly Review view-model ─────────────────────────────────────────────────
+// The pure engine result (WeeklyReviewData) plus the goal-grouping the store
+// assembles on top (completed-task counts per goal, via the lineage mechanism).
+// Grouping is here, not in the engine, because it needs a repository lookup.
+export interface CompletedGoalCount {
+  goalTitle: string
+  count: number
+}
+export type WeeklyReview = WeeklyReviewData & {
+  completedByGoal: CompletedGoalCount[]
+}
 
 interface GoalState {
   // --- goal list ---
@@ -153,6 +170,12 @@ interface GoalState {
   editTask: (id: ID, changes: TaskChanges) => Promise<void>
   removeTask: (id: ID) => Promise<void>
   toggleTaskComplete: (task: Task) => Promise<void>
+
+  // --- weekly review (its own /reviews route; loaded by that page, NOT bundled
+  // into the dashboard load) ---
+  weeklyReview: WeeklyReview | null
+  isLoadingReview: boolean
+  loadWeeklyReview: () => Promise<void>
 }
 
 export const useGoalStore = create<GoalState>()((set, get) => {
@@ -505,6 +528,40 @@ export const useGoalStore = create<GoalState>()((set, get) => {
         refreshDashboard(),
         refreshTopPriority(),
       ])
+    },
+
+    // --- weekly review ---
+    weeklyReview: null,
+    isLoadingReview: false,
+
+    // Computed LIVE (no snapshot tables, per ADR-0001): read every task once,
+    // run the pure engine for the window/completed/missed/daily-momentum, then
+    // assemble the completed-by-goal grouping with the existing lineage getter.
+    // Triggered by the Review page itself, not the dashboard load.
+    loadWeeklyReview: async () => {
+      set({ isLoadingReview: true })
+      try {
+        const tasks = await getAllTasks()
+        const review = computeWeeklyReview(tasks, new Date())
+
+        // Group completed tasks by their parent goal, reusing getTaskLineages
+        // (keyed by subgoalId) rather than rebuilding the task->goal walk. A task
+        // whose lineage no longer resolves (dangling) is left out of the grouping.
+        const lineages = await getTaskLineages(review.completedTasks)
+        const counts = new Map<string, number>()
+        for (const task of review.completedTasks) {
+          const goalTitle = lineages[task.subgoalId]?.goalTitle
+          if (goalTitle === undefined) continue
+          counts.set(goalTitle, (counts.get(goalTitle) ?? 0) + 1)
+        }
+        const completedByGoal: CompletedGoalCount[] = [...counts.entries()]
+          .map(([goalTitle, count]) => ({ goalTitle, count }))
+          .sort((a, b) => b.count - a.count || a.goalTitle.localeCompare(b.goalTitle))
+
+        set({ weeklyReview: { ...review, completedByGoal } })
+      } finally {
+        set({ isLoadingReview: false })
+      }
     },
   }
 })

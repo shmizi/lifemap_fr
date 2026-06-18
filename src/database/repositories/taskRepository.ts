@@ -54,6 +54,14 @@ export async function getTaskById(id: ID): Promise<Task | undefined> {
   return db.tasks.get(id);
 }
 
+export async function getAllTasks(): Promise<Task[]> {
+  // Whole-table read. Tasks live in one flat table (the hierarchy is foreign-key
+  // based, not nested storage — see stores.ts), so this is a direct toArray(),
+  // NOT a per-goal composition loop. Unsorted: callers that need the whole
+  // backlog (e.g. the Weekly Review's live computation) filter/group in memory.
+  return db.tasks.toArray();
+}
+
 export async function getTasksBySubgoalId(subgoalId: ID): Promise<Task[]> {
   // subgoalId IS indexed → query via the index, then sort by `order` in memory
   // (order is not indexed). Same shape as getSubgoalsByGoalId.
