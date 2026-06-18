@@ -88,8 +88,13 @@ export async function updateMilestone(
 }
 
 export async function deleteMilestone(id: ID): Promise<void> {
-  // TODO Phase 3: cascade delete tasks belonging to this milestone (and clear
-  // any dependencies referencing it). For now this removes only the milestone
-  // row, mirroring deleteSubgoal's Phase-1 behavior.
-  await db.milestones.delete(id);
+  // Delete a milestone AND the tasks grouped under it. Wrapped in one rw
+  // transaction so it is all-or-nothing. Leaving the tasks behind would strand
+  // them with a dangling milestoneId — present in their subgoal's task list but
+  // attached to no rendered milestone, so they would silently vanish from the
+  // goal tree while still counting toward progress.
+  await db.transaction('rw', db.milestones, db.tasks, async () => {
+    await db.tasks.where('milestoneId').equals(id).delete();
+    await db.milestones.delete(id);
+  });
 }
