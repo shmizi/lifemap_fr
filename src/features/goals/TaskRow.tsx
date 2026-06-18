@@ -7,7 +7,7 @@
 // link. The outer row is a `group` so RowActions can reveal on hover.
 
 import { useState } from 'react'
-import { Circle, CheckCircle2 } from 'lucide-react'
+import { Circle, CheckCircle2, CalendarDays } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import type { Task } from '@/core/types'
 import { PRIORITY_LABELS } from '@/core/constants'
@@ -68,6 +68,21 @@ export function TaskRow({ task }: TaskRowProps) {
       {showPriority ? (
         <span className="shrink-0 rounded-full border border-app-border px-2 py-0.5 text-[11px] text-app-text-muted">
           {PRIORITY_LABELS[task.priority]}
+        </span>
+      ) : null}
+
+      {/* Scheduled-date chip — marks tasks that appear on the Today list so they
+          read as "scheduled" in the goal tree too. scheduledDate is date-only
+          (YYYY-MM-DD); parseISO reads it as local midnight, which is correct for a
+          calendar-day value. The calendar icon distinguishes it from the bare
+          due-date text that follows. */}
+      {task.scheduledDate ? (
+        <span
+          className="flex shrink-0 items-center gap-1 rounded-full border border-app-border px-2 py-0.5 text-[11px] text-app-text-muted"
+          title={`Scheduled for ${format(parseISO(task.scheduledDate), 'd MMM yyyy')}`}
+        >
+          <CalendarDays size={11} aria-hidden />
+          {format(parseISO(task.scheduledDate), 'd MMM')}
         </span>
       ) : null}
 
