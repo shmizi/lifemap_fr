@@ -4,7 +4,8 @@
 // (only when the task sits under a specific milestone; omit for a loose task).
 // The overlay/panel shell now lives in the shared <Modal> component. Writes go
 // through addTask / editTask (the store owns order). Edit patches only
-// title/priority/dueDate/description — status, completedAt, etc. are preserved.
+// title/priority/dueDate/scheduledDate/description — status, completedAt, etc.
+// are preserved.
 
 import { useEffect, useState, type ReactNode } from 'react'
 import type { ID, Priority, Task } from '@/core/types'
@@ -41,6 +42,10 @@ export function TaskCreationModal({
   const [title, setTitle] = useState('')
   const [priority, setPriority] = useState<Priority>(DEFAULT_TASK_PRIORITY)
   const [dueDate, setDueDate] = useState('')
+  // scheduledDate is stored date-only (YYYY-MM-DD), which is exactly what an
+  // <input type="date"> emits — no parsing/formatting needed. Setting it puts
+  // the task on the Today list for that local calendar day.
+  const [scheduledDate, setScheduledDate] = useState('')
   const [description, setDescription] = useState('')
   const [isSaving, setIsSaving] = useState(false)
 
@@ -49,6 +54,7 @@ export function TaskCreationModal({
     setTitle(task?.title ?? '')
     setPriority(task?.priority ?? DEFAULT_TASK_PRIORITY)
     setDueDate(task?.dueDate ?? '')
+    setScheduledDate(task?.scheduledDate ?? '')
     setDescription(task?.description ?? '')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
@@ -69,6 +75,7 @@ export function TaskCreationModal({
           title: title.trim(),
           priority,
           dueDate: dueDate || undefined,
+          scheduledDate: scheduledDate || undefined,
           description: description.trim() || undefined,
         })
       } else {
@@ -80,6 +87,7 @@ export function TaskCreationModal({
           isRecurring: false,
           ...(milestoneId ? { milestoneId } : {}),
           ...(dueDate ? { dueDate } : {}),
+          ...(scheduledDate ? { scheduledDate } : {}),
           ...(description.trim() ? { description: description.trim() } : {}),
         })
       }
@@ -131,6 +139,18 @@ export function TaskCreationModal({
             />
           </Field>
         </div>
+
+        <Field label="Scheduled for (optional)">
+          <input
+            type="date"
+            value={scheduledDate}
+            onChange={(e) => setScheduledDate(e.target.value)}
+            className={inputClass}
+          />
+          <span className="mt-1 block text-xs text-app-text-muted">
+            Adds this task to your Today list on that day.
+          </span>
+        </Field>
 
         <Field label="Description (optional)">
           <textarea
