@@ -129,6 +129,10 @@ interface GoalState {
   // Each SubgoalSection reads its own entry to draw a progress ring. Rebuilt
   // every time currentGoalTree is (re)assembled so the two never disagree.
   subgoalProgress: Record<ID, SubgoalProgress>
+  // Whole-goal task-completion momentum for the on-screen tree (every task
+  // across all its subgoals), shown in the Goal Detail header. Derived from the
+  // same tree, in the same pass, so it never drifts from the per-subgoal rings.
+  currentGoalProgress: GoalProgress
   isLoadingTree: boolean
   loadGoalTree: (id: ID) => Promise<void>
 
@@ -161,20 +165,34 @@ export const useGoalStore = create<GoalState>()((set, get) => {
     const result: Record<ID, SubgoalProgress> = {}
     if (!tree) return result
     for (const st of tree.subgoals) {
-      const tasks = [
-        ...st.looseTasks,
-        ...st.milestones.flatMap((m) => m.tasks),
-      ]
-      result[st.subgoal.id] = computeSubgoalProgress(tasks)
+      result[st.subgoal.id] = computeSubgoalProgress(tasksOfSubgoal(st))
     }
     return result
   }
+
+  // The tasks belonging to one subgoal: its loose tasks plus every task across
+  // its milestones. Shared by the per-subgoal and whole-goal progress derivations
+  // so they count exactly the same set.
+  const tasksOfSubgoal = (st: GoalTree['subgoals'][number]): Task[] => [
+    ...st.looseTasks,
+    ...st.milestones.flatMap((m) => m.tasks),
+  ]
+
+  // Whole-goal progress = every task across every subgoal, computed by the
+  // engine. 0/0 when the tree is absent so the header reads as nothing scheduled
+  // rather than stale.
+  const goalProgressFromTree = (tree: GoalTree | null): GoalProgress =>
+    computeGoalProgress(tree ? tree.subgoals.flatMap(tasksOfSubgoal) : [])
 
   const refreshCurrentTree = async () => {
     const goalId = get().currentGoalTree?.goal.id
     if (goalId) {
       const tree = (await getGoalTree(goalId)) ?? null
-      set({ currentGoalTree: tree, subgoalProgress: subgoalProgressFromTree(tree) })
+      set({
+        currentGoalTree: tree,
+        subgoalProgress: subgoalProgressFromTree(tree),
+        currentGoalProgress: goalProgressFromTree(tree),
+      })
     }
   }
 
@@ -326,17 +344,24 @@ export const useGoalStore = create<GoalState>()((set, get) => {
     // --- goal tree ---
     currentGoalTree: null,
     subgoalProgress: {},
+    currentGoalProgress: { completed: 0, total: 0, percent: 0 },
     isLoadingTree: false,
 
     // Blanks the tree first (avoids a stale-goal flash when navigating between
     // detail pages); in-place refreshes after a mutation use refreshCurrentTree.
     loadGoalTree: async (id) => {
-      set({ isLoadingTree: true, currentGoalTree: null, subgoalProgress: {} })
+      set({
+        isLoadingTree: true,
+        currentGoalTree: null,
+        subgoalProgress: {},
+        currentGoalProgress: { completed: 0, total: 0, percent: 0 },
+      })
       try {
         const tree = (await getGoalTree(id)) ?? null
         set({
           currentGoalTree: tree,
           subgoalProgress: subgoalProgressFromTree(tree),
+          currentGoalProgress: goalProgressFromTree(tree),
         })
       } finally {
         set({ isLoadingTree: false })

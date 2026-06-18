@@ -8,10 +8,10 @@
 // actions reveal on hover. Counts use array .length only — display formatting,
 // not engine-level progress calculation.
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, Plus } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
-import type { SubgoalTree } from '@/core/types'
+import type { ID, MilestoneStatus, SubgoalTree } from '@/core/types'
 import { SUBGOAL_STATUS_LABELS } from '@/core/constants'
 import { useGoalStore } from '@/store/useGoalStore'
 import { RowActions } from '@/components/ui/RowActions'
@@ -39,6 +39,51 @@ export function SubgoalSection({ data }: SubgoalSectionProps) {
   const [isAddMilestoneOpen, setIsAddMilestoneOpen] = useState(false)
   const [isAddTaskOpen, setIsAddTaskOpen] = useState(false)
   const [isEditOpen, setIsEditOpen] = useState(false)
+
+  // Celebrate milestones that auto-complete while this section is COLLAPSED.
+  // Their MilestoneCard isn't mounted then, so it can't catch the live
+  // transition — but SubgoalSection stays mounted and still receives status
+  // updates. We diff statuses here and, on re-expand, tell those cards to play
+  // the flourish as they appear. While expanded, the cards catch their own
+  // transitions, so we record nothing.
+  const prevStatuses = useRef<Record<string, MilestoneStatus>>({})
+  const [pendingCelebrations, setPendingCelebrations] = useState<Set<ID>>(
+    new Set(),
+  )
+
+  useEffect(() => {
+    if (!expanded) {
+      setPendingCelebrations((prev) => {
+        let next = prev
+        for (const { milestone } of milestones) {
+          const was = prevStatuses.current[milestone.id]
+          if (
+            was !== undefined &&
+            was !== 'completed' &&
+            milestone.status === 'completed'
+          ) {
+            if (next === prev) next = new Set(prev)
+            next.add(milestone.id)
+          }
+        }
+        return next
+      })
+    }
+    // Remember the current statuses (regardless of expand state) for the next diff.
+    const snapshot: Record<string, MilestoneStatus> = {}
+    for (const { milestone } of milestones) {
+      snapshot[milestone.id] = milestone.status
+    }
+    prevStatuses.current = snapshot
+  }, [milestones, expanded])
+
+  // Once expanded, the pending cards have been handed celebrateOnAppear; clear
+  // the set so a later collapse/expand cycle doesn't replay them.
+  useEffect(() => {
+    if (expanded && pendingCelebrations.size > 0) {
+      setPendingCelebrations(new Set())
+    }
+  }, [expanded, pendingCelebrations])
 
   const milestoneCount = milestones.length
   const taskCount =
@@ -96,6 +141,12 @@ export function SubgoalSection({ data }: SubgoalSectionProps) {
             <MilestoneCard
               key={milestoneTree.milestone.id}
               data={milestoneTree}
+              // Guard with the current status so a complete-then-reopen while
+              // collapsed doesn't celebrate a milestone that's no longer done.
+              celebrateOnAppear={
+                pendingCelebrations.has(milestoneTree.milestone.id) &&
+                milestoneTree.milestone.status === 'completed'
+              }
             />
           ))}
 
