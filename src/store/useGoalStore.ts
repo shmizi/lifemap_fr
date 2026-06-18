@@ -36,6 +36,7 @@ import {
   type SubgoalProgress,
 } from '@/engine/progress/computeSubgoalProgress'
 import { isMilestoneComplete } from '@/engine/progress/isMilestoneComplete'
+import { rankTasks } from '@/engine/priority/rankTasks'
 import {
   getAllGoals,
   createGoal,
@@ -114,6 +115,11 @@ interface GoalState {
   // Momentum for today's scheduled tasks only, computed by the engine (never
   // inline). Refreshed alongside todaysTasks; MomentumBar reads it.
   todayProgress: TodayProgress
+  // A small focus list: the top-scored INCOMPLETE tasks across ALL goals, ranked
+  // by the priority engine — independent of whether they are scheduled for today.
+  // This is a different lens from todaysTasks (which is "what I planned today").
+  // Refreshed on dashboard load and after any task mutation.
+  topPriorityTasks: Task[]
   isLoadingDashboard: boolean
   loadDashboard: () => Promise<void>
 
@@ -252,6 +258,19 @@ export const useGoalStore = create<GoalState>()((set, get) => {
     set({ goals, goalProgress: Object.fromEntries(entries) })
   }
 
+  // Recompute the dashboard's top-priority focus list. It ranks EVERY incomplete
+  // task across ALL goals, so it gathers them by composing the existing getters
+  // (getAllGoals + getTasksByGoalId) — no new repository query. rankTasks does
+  // the scoring/sorting/top-N; the store never ranks inline. `new Date()` is read
+  // once here so the whole list is scored against a single consistent "now".
+  const refreshTopPriority = async () => {
+    const goals = await getAllGoals()
+    const tasksPerGoal = await Promise.all(
+      goals.map((goal) => getTasksByGoalId(goal.id)),
+    )
+    set({ topPriorityTasks: rankTasks(tasksPerGoal.flat(), new Date()) })
+  }
+
   // Apply the milestone auto-completion rule after a task changes: a milestone
   // is completed when ALL its tasks are completed, and re-opens (-> active) when
   // one is un-done. Only writes on an actual transition, so a no-op toggle costs
@@ -322,15 +341,17 @@ export const useGoalStore = create<GoalState>()((set, get) => {
     thisWeekTasks: [],
     taskLineages: {},
     todayProgress: { completed: 0, total: 0, percent: 0 },
+    topPriorityTasks: [],
     isLoadingDashboard: false,
 
-    // Initial load of the dashboard windows (flips the loading flag for the first
-    // paint). The date-only local-day logic lives in refreshDashboard so there is
-    // one source of truth; this only wraps it with the loading flag.
+    // Initial load of the dashboard (flips the loading flag for the first paint).
+    // Loads the scheduled-task windows and the cross-goal priority list together;
+    // each refresher owns its own data source. The window/local-day logic lives
+    // in refreshDashboard so there is one source of truth.
     loadDashboard: async () => {
       set({ isLoadingDashboard: true })
       try {
-        await refreshDashboard()
+        await Promise.all([refreshDashboard(), refreshTopPriority()])
       } finally {
         set({ isLoadingDashboard: false })
       }
@@ -416,10 +437,14 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       const task = await createTask({ ...input, order })
       // A new (pending) task under a completed milestone must re-open it.
       if (input.milestoneId) await reconcileMilestone(input.milestoneId)
-      // Refresh both surfaces: the goal tree (Detail View) and the dashboard
-      // windows. One uniform invariant — every task mutation refreshes both, and
-      // each refresher no-ops cheaply for the view that isn't mounted.
-      await Promise.all([refreshCurrentTree(), refreshDashboard()])
+      // Refresh every surface a task touches: the goal tree (Detail View), the
+      // dashboard windows, and the cross-goal priority list. One uniform
+      // invariant — each refresher no-ops cheaply for a view that isn't mounted.
+      await Promise.all([
+        refreshCurrentTree(),
+        refreshDashboard(),
+        refreshTopPriority(),
+      ])
       return task
     },
     editTask: async (id, changes) => {
@@ -436,7 +461,11 @@ export const useGoalStore = create<GoalState>()((set, get) => {
         'milestoneId' in changes ? changes.milestoneId : before?.milestoneId
       if (newMilestoneId) affected.add(newMilestoneId)
       await Promise.all([...affected].map(reconcileMilestone))
-      await Promise.all([refreshCurrentTree(), refreshDashboard()])
+      await Promise.all([
+        refreshCurrentTree(),
+        refreshDashboard(),
+        refreshTopPriority(),
+      ])
     },
     removeTask: async (id) => {
       // Removing a task can complete its milestone (if it was the last open
@@ -444,7 +473,11 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       const before = await getTaskById(id)
       await deleteTask(id)
       if (before?.milestoneId) await reconcileMilestone(before.milestoneId)
-      await Promise.all([refreshCurrentTree(), refreshDashboard()])
+      await Promise.all([
+        refreshCurrentTree(),
+        refreshDashboard(),
+        refreshTopPriority(),
+      ])
     },
 
     // Flip a task between completed and pending. Completing stamps completedAt
@@ -463,7 +496,11 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       // Loose tasks (no milestoneId) have no milestone to reconcile. Run before
       // the refreshes so the tree picks up the milestone's new status too.
       if (task.milestoneId) await reconcileMilestone(task.milestoneId)
-      await Promise.all([refreshCurrentTree(), refreshDashboard()])
+      await Promise.all([
+        refreshCurrentTree(),
+        refreshDashboard(),
+        refreshTopPriority(),
+      ])
     },
   }
 })
