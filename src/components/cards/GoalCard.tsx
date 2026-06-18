@@ -19,6 +19,7 @@ import { Trash2 } from 'lucide-react'
 import type { Goal } from '@/core/types'
 import { goalDetailPath, GOAL_CATEGORY_OPTIONS } from '@/core/constants'
 import { useGoalStore } from '@/store/useGoalStore'
+import { ProgressRing } from '@/components/progress/ProgressRing'
 
 interface GoalCardProps {
   goal: Goal
@@ -33,6 +34,11 @@ function categoryLabel(value: Goal['category']): string {
 export function GoalCard({ goal }: GoalCardProps) {
   const setSelectedGoalId = useGoalStore((s) => s.setSelectedGoalId)
   const removeGoal = useGoalStore((s) => s.removeGoal)
+  // Engine-computed momentum for this goal (the store builds it on load). May be
+  // absent for a brand-new goal until the next list refresh; treated as no ring.
+  const progress = useGoalStore((s) => s.goalProgress[goal.id])
+  // A goal with no tasks has no momentum to show — keep the card calm, no ring.
+  const showRing = progress !== undefined && progress.total > 0
 
   // Two-step delete: idle -> confirming -> (delete | cancel). The confirm step
   // matters because deletion is destructive and there is no undo.
@@ -71,9 +77,17 @@ export function GoalCard({ goal }: GoalCardProps) {
           </p>
         ) : null}
 
-        {/* Right padding leaves room for the delete control in this row. */}
-        <div className="mt-4 pr-20 text-xs text-app-text-muted">
-          Target {format(parseISO(goal.targetDate), 'd MMM yyyy')}
+        {/* Right padding leaves room for the delete control in this row. The
+            ring sits beside the target date so momentum and deadline read
+            together; it is hidden for a goal with no tasks. */}
+        <div className="mt-4 flex items-center gap-3 pr-20 text-xs text-app-text-muted">
+          {showRing ? (
+            <ProgressRing
+              percent={progress.percent}
+              ariaLabel={`${progress.completed} of ${progress.total} tasks complete`}
+            />
+          ) : null}
+          <span>Target {format(parseISO(goal.targetDate), 'd MMM yyyy')}</span>
         </div>
       </Link>
 

@@ -15,6 +15,7 @@ import type { SubgoalTree } from '@/core/types'
 import { SUBGOAL_STATUS_LABELS } from '@/core/constants'
 import { useGoalStore } from '@/store/useGoalStore'
 import { RowActions } from '@/components/ui/RowActions'
+import { ProgressRing } from '@/components/progress/ProgressRing'
 import { MilestoneCard } from '@/features/goals/MilestoneCard'
 import { MilestoneCreationModal } from '@/features/goals/MilestoneCreationModal'
 import { TaskCreationModal } from '@/features/goals/TaskCreationModal'
@@ -28,6 +29,10 @@ interface SubgoalSectionProps {
 export function SubgoalSection({ data }: SubgoalSectionProps) {
   const { subgoal, milestones, looseTasks } = data
   const removeSubgoal = useGoalStore((s) => s.removeSubgoal)
+  // Engine-computed momentum for this subgoal (the store derives it from the
+  // tree). Absent or task-less subgoals show no ring, keeping the header calm.
+  const progress = useGoalStore((s) => s.subgoalProgress[subgoal.id])
+  const showRing = progress !== undefined && progress.total > 0
 
   // Default expanded so the hierarchy is visible at a glance for now.
   const [expanded, setExpanded] = useState(true)
@@ -65,6 +70,14 @@ export function SubgoalSection({ data }: SubgoalSectionProps) {
             </span>
           </span>
         </button>
+
+        {showRing ? (
+          <ProgressRing
+            percent={progress.percent}
+            size={34}
+            ariaLabel={`${progress.completed} of ${progress.total} tasks complete`}
+          />
+        ) : null}
 
         <span className="shrink-0 rounded-full border border-app-border px-2.5 py-0.5 text-xs text-app-text-muted">
           {SUBGOAL_STATUS_LABELS[subgoal.status]}

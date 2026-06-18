@@ -127,3 +127,24 @@ export async function getTaskLineages(
   }
   return lineages;
 }
+
+/**
+ * Every task under a goal, across all of its subgoals (and milestones).
+ *
+ * WHY this lives here: a Task carries no goalId — it points at a subgoal, which
+ * points at the goal. Walking that two-step join is exactly the parent-child
+ * reconstruction the data-flow rule keeps out of the UI/store, so we compose it
+ * once here from the existing by-parent getters. The goal's progress ring is
+ * computed from this list (see computeGoalProgress).
+ *
+ * Order is not meaningful across a whole goal, so the flattened list is returned
+ * as-is (each subgoal's tasks are already in `order`); callers that only count
+ * completion (the progress engine) do not depend on cross-subgoal ordering.
+ */
+export async function getTasksByGoalId(goalId: ID): Promise<Task[]> {
+  const subgoals = await getSubgoalsByGoalId(goalId);
+  const taskLists = await Promise.all(
+    subgoals.map((subgoal) => getTasksBySubgoalId(subgoal.id)),
+  );
+  return taskLists.flat();
+}
