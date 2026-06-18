@@ -65,8 +65,14 @@ export async function updateSubgoal(
   return (await db.subgoals.get(id))!;
 }
 
-// Delete a subgoal by id.
-// TODO Phase 3: cascade delete milestones and tasks belonging to this subgoal
+// Delete a subgoal AND its descendants — every milestone and every task under
+// it. Wrapped in one rw transaction so the cascade is all-or-nothing (a failure
+// rolls back rather than leaving a partial orphan trail). Tasks are found by
+// subgoalId, which covers both milestone-grouped and loose tasks in one query.
 export async function deleteSubgoal(id: ID): Promise<void> {
-  await db.subgoals.delete(id);
+  await db.transaction('rw', db.subgoals, db.milestones, db.tasks, async () => {
+    await db.milestones.where('subgoalId').equals(id).delete();
+    await db.tasks.where('subgoalId').equals(id).delete();
+    await db.subgoals.delete(id);
+  });
 }

@@ -123,12 +123,43 @@ export async function updateGoal(
 }
 
 /**
- * Permanently remove a goal.
+ * Permanently remove a goal AND everything beneath it — its subgoals, their
+ * milestones, and all their tasks.
  *
- * WHY: a plain wrapper over Dexie delete so deletion goes through the same
- * boundary as every other goal operation. Deleting an unknown id is a no-op in
- * Dexie, which is the desired idempotent behaviour for a delete.
+ * WHY cascade: a Goal is the root of a strict hierarchy (Goal -> Subgoal ->
+ * Milestone/Task). Deleting only the goal row left descendants stranded in
+ * IndexedDB forever — invisible to the UI but still counted by progress/priority
+ * queries. Now the whole subtree goes.
+ *
+ * WHY one transaction: the deletes are wrapped in a single rw transaction so the
+ * cascade is all-or-nothing. A mid-way failure rolls back rather than leaving a
+ * half-deleted subtree (its own fresh orphan trail).
+ *
+ * Tasks are found by subgoalId, not by walking milestones: EVERY task carries a
+ * subgoalId (milestoneId is optional), so deleting by subgoalId covers both
+ * milestone-grouped and loose tasks in one query. Deleting an unknown id stays a
+ * no-op (the subgoal/task queries simply match nothing).
  */
 export async function deleteGoal(id: ID): Promise<void> {
-  await db.goals.delete(id);
+  await db.transaction(
+    'rw',
+    db.goals,
+    db.subgoals,
+    db.milestones,
+    db.tasks,
+    async () => {
+      const subgoalIds = await db.subgoals
+        .where('goalId')
+        .equals(id)
+        .primaryKeys();
+
+      if (subgoalIds.length > 0) {
+        await db.milestones.where('subgoalId').anyOf(subgoalIds).delete();
+        await db.tasks.where('subgoalId').anyOf(subgoalIds).delete();
+      }
+
+      await db.subgoals.where('goalId').equals(id).delete();
+      await db.goals.delete(id);
+    },
+  );
 }
