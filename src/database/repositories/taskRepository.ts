@@ -105,6 +105,21 @@ export async function getTasksScheduledBetween(
   );
 }
 
+export async function getTasksScheduledBefore(before: ISODate): Promise<Task[]> {
+  // scheduledDate IS indexed → range-query the index. `.below()` is an EXCLUSIVE
+  // upper bound, so a task scheduled exactly on `before` is NOT returned — pass
+  // today to get strictly-past tasks (today belongs to its own list). Tasks with
+  // no scheduledDate are absent from the index and correctly excluded.
+  //
+  // Returned scheduledDate-ascending (oldest first), matching
+  // getTasksScheduledBetween — the dashboard's overdue list wants oldest at top.
+  // Completion filtering is the caller's job (done in memory), per convention.
+  const tasks = await db.tasks.where('scheduledDate').below(before).toArray();
+  return tasks.sort((a, b) =>
+    (a.scheduledDate ?? '').localeCompare(b.scheduledDate ?? ''),
+  );
+}
+
 export async function updateTask(id: ID, changes: UpdateTaskInput): Promise<void> {
   // Refresh updatedAt on every patch (Task HAS this field, unlike Milestone).
   // Dexie's update() returns the modified-row count; 0 means no match → throw,

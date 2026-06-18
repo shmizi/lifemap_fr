@@ -21,9 +21,10 @@ import type {
   GoalTree,
   SubgoalTree,
   MilestoneTree,
+  TaskLineage,
 } from '@/core/types';
 import { getGoalById } from './goalRepository';
-import { getSubgoalsByGoalId } from './subgoalRepository';
+import { getSubgoalById, getSubgoalsByGoalId } from './subgoalRepository';
 import { getMilestonesBySubgoalId } from './milestoneRepository';
 import { getTasksBySubgoalId } from './taskRepository';
 
@@ -85,4 +86,44 @@ export async function getGoalTree(goalId: ID): Promise<GoalTree | undefined> {
   subgoalTrees.sort((a, b) => a.subgoal.order - b.subgoal.order);
 
   return { goal, subgoals: subgoalTrees };
+}
+
+/**
+ * Resolve the subgoal -> goal lineage for a set of tasks, keyed by subgoalId.
+ *
+ * WHY this lives here: the dashboard answers "why does this task matter" by
+ * showing each scheduled task's "Subgoal · Goal" context. That join (task ->
+ * subgoal -> goal) is exactly the parent-walking the data-flow rule keeps out of
+ * the UI, so we compose it once here from existing getters — no new queries, no
+ * new indexes, same as getGoalTree.
+ *
+ * Keyed by subgoalId (not task id) because every task under one subgoal shares
+ * the same lineage; deduping to unique subgoals means one subgoal+goal lookup
+ * per subgoal regardless of how many tasks point at it. A task whose subgoal or
+ * goal no longer exists (a dangling row) is simply absent from the result, so
+ * the caller renders no lineage for it rather than crashing.
+ */
+export async function getTaskLineages(
+  tasks: Task[],
+): Promise<Record<ID, TaskLineage>> {
+  const subgoalIds = [...new Set(tasks.map((task) => task.subgoalId))];
+
+  const entries = await Promise.all(
+    subgoalIds.map(async (subgoalId): Promise<[ID, TaskLineage] | null> => {
+      const subgoal = await getSubgoalById(subgoalId);
+      if (!subgoal) return null; // dangling task -> no lineage
+      const goal = await getGoalById(subgoal.goalId);
+      if (!goal) return null;
+      return [
+        subgoalId,
+        { subgoalTitle: subgoal.title, goalTitle: goal.title },
+      ];
+    }),
+  );
+
+  const lineages: Record<ID, TaskLineage> = {};
+  for (const entry of entries) {
+    if (entry) lineages[entry[0]] = entry[1];
+  }
+  return lineages;
 }

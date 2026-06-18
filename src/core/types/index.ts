@@ -152,3 +152,14 @@ export interface GoalTree {
   goal: Goal;
   subgoals: SubgoalTree[];
 }
+
+// A task's "why it matters" lineage: the subgoal and goal it rolls up to.
+// READ-ONLY display shape, never persisted. Resolved in memory (see
+// hierarchyRepository.getTaskLineages) so a dashboard task can show "Subgoal ·
+// Goal" context without the UI fetching and joining parents itself. The lineage
+// is identical for every task under the same subgoal, so callers key it by
+// subgoalId and dedupe to one lookup per subgoal.
+export interface TaskLineage {
+  subgoalTitle: string;
+  goalTitle: string;
+}

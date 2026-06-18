@@ -13,8 +13,16 @@
 // in later phases.
 
 import { create } from 'zustand'
-import { format } from 'date-fns'
-import type { Goal, Subgoal, Milestone, Task, GoalTree, ID } from '@/core/types'
+import { format, addDays } from 'date-fns'
+import type {
+  Goal,
+  Subgoal,
+  Milestone,
+  Task,
+  GoalTree,
+  TaskLineage,
+  ID,
+} from '@/core/types'
 import {
   computeTodayProgress,
   type TodayProgress,
@@ -38,6 +46,8 @@ import {
   updateTask,
   deleteTask,
   getTasksScheduledBetween,
+  getTasksScheduledBefore,
+  getTaskLineages,
 } from '@/database/repositories'
 
 // ── "New X" input shapes (creation forms) ───────────────────────────────────
@@ -70,13 +80,25 @@ interface GoalState {
   editGoal: (id: ID, changes: GoalChanges) => Promise<void>
   removeGoal: (id: ID) => Promise<void>
 
-  // --- today (dashboard) ---
+  // --- dashboard (today + overdue + upcoming) ---
+  // Three scheduled-task windows the dashboard shows side by side. All keyed off
+  // the local calendar day (scheduledDate is date-only YYYY-MM-DD):
+  //   overdueTasks  : scheduled before today AND not completed (still owed)
+  //   todaysTasks   : scheduled for today
+  //   thisWeekTasks : scheduled tomorrow .. 7 days out (rolling upcoming window)
+  overdueTasks: Task[]
   todaysTasks: Task[]
-  // Momentum for today's scheduled tasks, computed by the engine (never inline).
-  // Refreshed alongside todaysTasks; MomentumBar reads it.
+  thisWeekTasks: Task[]
+  // "Why it matters" lineage for every task shown across the three windows,
+  // keyed by subgoalId (lineage is shared by all tasks under a subgoal). The
+  // dashboard reads it to render each task's "Subgoal · Goal" context.
+  // Refreshed in the same pass as the windows so a row and its lineage agree.
+  taskLineages: Record<ID, TaskLineage>
+  // Momentum for today's scheduled tasks only, computed by the engine (never
+  // inline). Refreshed alongside todaysTasks; MomentumBar reads it.
   todayProgress: TodayProgress
-  isLoadingToday: boolean
-  loadTodaysTasks: () => Promise<void>
+  isLoadingDashboard: boolean
+  loadDashboard: () => Promise<void>
 
   // --- selection ---
   selectedGoalId: ID | null
@@ -115,15 +137,44 @@ export const useGoalStore = create<GoalState>()((set, get) => {
     }
   }
 
-  // Re-fetch the Today list in place (no loading-flag flip -> no flicker),
-  // mirroring refreshCurrentTree. Called after any task mutation so the
-  // dashboard's Today list reflects it without a remount. Keys off a date-only
-  // LOCAL day (scheduledDate is stored date-only YYYY-MM-DD), and recomputes
-  // today's momentum via the engine in the same pass so the two never drift.
-  const refreshTodaysTasks = async () => {
-    const today = format(new Date(), 'yyyy-MM-dd')
-    const todaysTasks = await getTasksScheduledBetween(today, today)
-    set({ todaysTasks, todayProgress: computeTodayProgress(todaysTasks) })
+  // Re-fetch all three dashboard windows in place (no loading-flag flip -> no
+  // flicker), mirroring refreshCurrentTree. Called after any task mutation so the
+  // dashboard reflects it without a remount. Every bound is a date-only LOCAL day
+  // (scheduledDate is stored date-only YYYY-MM-DD); the three reads run in
+  // parallel and today's momentum is recomputed via the engine in the same pass
+  // so the list and its progress never drift.
+  const refreshDashboard = async () => {
+    const now = new Date()
+    const today = format(now, 'yyyy-MM-dd')
+    const tomorrow = format(addDays(now, 1), 'yyyy-MM-dd')
+    const weekOut = format(addDays(now, 7), 'yyyy-MM-dd')
+
+    const [overdueRaw, todaysTasks, thisWeekTasks] = await Promise.all([
+      getTasksScheduledBefore(today),
+      getTasksScheduledBetween(today, today),
+      getTasksScheduledBetween(tomorrow, weekOut),
+    ])
+
+    // Overdue means still owed: drop past tasks that are already done. (The repo
+    // returns raw rows; status filtering is the caller's job, per convention.)
+    const overdueTasks = overdueRaw.filter((t) => t.status !== 'completed')
+
+    // Resolve each shown task's subgoal -> goal lineage in one deduped pass. This
+    // is a second round-trip (it needs the windows' subgoalIds first); fine at
+    // this scale, and it keeps lineage in sync with the very tasks displayed.
+    const taskLineages = await getTaskLineages([
+      ...overdueTasks,
+      ...todaysTasks,
+      ...thisWeekTasks,
+    ])
+
+    set({
+      overdueTasks,
+      todaysTasks,
+      thisWeekTasks,
+      taskLineages,
+      todayProgress: computeTodayProgress(todaysTasks),
+    })
   }
 
   // Next display position among a set of siblings: max(order)+1, which is
@@ -165,20 +216,23 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       set({ goals: await getAllGoals() })
     },
 
-    // --- today (dashboard) ---
+    // --- dashboard (today + overdue + upcoming) ---
+    overdueTasks: [],
     todaysTasks: [],
+    thisWeekTasks: [],
+    taskLineages: {},
     todayProgress: { completed: 0, total: 0, percent: 0 },
-    isLoadingToday: false,
+    isLoadingDashboard: false,
 
-    // Initial load of today's tasks (flips the loading flag for the first paint).
-    // The date-only local-day logic lives in refreshTodaysTasks so there is one
-    // source of truth; this only wraps it with the loading flag.
-    loadTodaysTasks: async () => {
-      set({ isLoadingToday: true })
+    // Initial load of the dashboard windows (flips the loading flag for the first
+    // paint). The date-only local-day logic lives in refreshDashboard so there is
+    // one source of truth; this only wraps it with the loading flag.
+    loadDashboard: async () => {
+      set({ isLoadingDashboard: true })
       try {
-        await refreshTodaysTasks()
+        await refreshDashboard()
       } finally {
-        set({ isLoadingToday: false })
+        set({ isLoadingDashboard: false })
       }
     },
 
@@ -249,19 +303,19 @@ export const useGoalStore = create<GoalState>()((set, get) => {
         .map((t) => t.order)
       const order = nextOrder(groupOrders)
       const task = await createTask({ ...input, order })
-      // Refresh both surfaces: the goal tree (Detail View) and the Today list
-      // (dashboard). One uniform invariant — every task mutation refreshes both,
-      // and each refresher no-ops cheaply for the view that isn't mounted.
-      await Promise.all([refreshCurrentTree(), refreshTodaysTasks()])
+      // Refresh both surfaces: the goal tree (Detail View) and the dashboard
+      // windows. One uniform invariant — every task mutation refreshes both, and
+      // each refresher no-ops cheaply for the view that isn't mounted.
+      await Promise.all([refreshCurrentTree(), refreshDashboard()])
       return task
     },
     editTask: async (id, changes) => {
       await updateTask(id, changes)
-      await Promise.all([refreshCurrentTree(), refreshTodaysTasks()])
+      await Promise.all([refreshCurrentTree(), refreshDashboard()])
     },
     removeTask: async (id) => {
       await deleteTask(id)
-      await Promise.all([refreshCurrentTree(), refreshTodaysTasks()])
+      await Promise.all([refreshCurrentTree(), refreshDashboard()])
     },
 
     // Flip a task between completed and pending. Completing stamps completedAt
@@ -276,7 +330,7 @@ export const useGoalStore = create<GoalState>()((set, get) => {
           ? { status: 'completed', completedAt: new Date().toISOString() }
           : { status: 'pending', completedAt: undefined },
       )
-      await Promise.all([refreshCurrentTree(), refreshTodaysTasks()])
+      await Promise.all([refreshCurrentTree(), refreshDashboard()])
     },
   }
 })
