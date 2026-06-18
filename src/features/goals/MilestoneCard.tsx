@@ -6,7 +6,7 @@
 // SubgoalSection above already provides the expand/collapse layer. The header is
 // a `group` so the edit/delete actions reveal on hover.
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Plus } from 'lucide-react'
 import type { MilestoneTree } from '@/core/types'
 import { MILESTONE_STATUS_LABELS } from '@/core/constants'
@@ -15,6 +15,10 @@ import { RowActions } from '@/components/ui/RowActions'
 import { TaskRow } from '@/features/goals/TaskRow'
 import { TaskCreationModal } from '@/features/goals/TaskCreationModal'
 import { MilestoneCreationModal } from '@/features/goals/MilestoneCreationModal'
+import { MilestoneCelebration } from '@/components/animations/MilestoneCelebration'
+
+// How long the completion flourish stays on screen before it clears (ms).
+const CELEBRATION_MS = 1400
 
 interface MilestoneCardProps {
   data: MilestoneTree
@@ -26,8 +30,28 @@ export function MilestoneCard({ data }: MilestoneCardProps) {
   const [isAddTaskOpen, setIsAddTaskOpen] = useState(false)
   const [isEditOpen, setIsEditOpen] = useState(false)
 
+  // Play the celebration only on a LIVE active -> completed transition (when the
+  // auto-completion rule flips this milestone), never on first render of an
+  // already-completed milestone. The ref seeds with the current status so a
+  // milestone that mounts completed does not celebrate.
+  const prevStatus = useRef(milestone.status)
+  const [celebrate, setCelebrate] = useState(false)
+  useEffect(() => {
+    if (
+      milestone.status === 'completed' &&
+      prevStatus.current !== 'completed'
+    ) {
+      setCelebrate(true)
+      const timer = setTimeout(() => setCelebrate(false), CELEBRATION_MS)
+      prevStatus.current = milestone.status
+      return () => clearTimeout(timer)
+    }
+    prevStatus.current = milestone.status
+  }, [milestone.status])
+
   return (
-    <div className="rounded-app-lg border border-app-border p-3">
+    <div className="relative rounded-app-lg border border-app-border p-3">
+      <MilestoneCelebration show={celebrate} />
       <div className="group flex items-center justify-between gap-3">
         <h4 className="text-sm font-medium text-app-text">{milestone.title}</h4>
         <div className="flex items-center gap-2">

@@ -28,6 +28,15 @@ import {
   type TodayProgress,
 } from '@/engine/progress/computeTodayProgress'
 import {
+  computeGoalProgress,
+  type GoalProgress,
+} from '@/engine/progress/computeGoalProgress'
+import {
+  computeSubgoalProgress,
+  type SubgoalProgress,
+} from '@/engine/progress/computeSubgoalProgress'
+import { isMilestoneComplete } from '@/engine/progress/isMilestoneComplete'
+import {
   getAllGoals,
   createGoal,
   updateGoal,
@@ -38,16 +47,20 @@ import {
   updateSubgoal,
   deleteSubgoal,
   getMilestonesBySubgoalId,
+  getMilestoneById,
   createMilestone,
   updateMilestone,
   deleteMilestone,
   getTasksBySubgoalId,
+  getTasksByMilestoneId,
+  getTaskById,
   createTask,
   updateTask,
   deleteTask,
   getTasksScheduledBetween,
   getTasksScheduledBefore,
   getTaskLineages,
+  getTasksByGoalId,
 } from '@/database/repositories'
 
 // ── "New X" input shapes (creation forms) ───────────────────────────────────
@@ -74,6 +87,10 @@ export type TaskChanges = Partial<Omit<Task, 'id' | 'createdAt' | 'updatedAt'>>
 interface GoalState {
   // --- goal list ---
   goals: Goal[]
+  // Task-completion momentum per goal, keyed by goalId, computed by the engine
+  // (never inline). Feeds the calm progress ring on each GoalCard. Refreshed
+  // whenever the goal list is (re)loaded or a goal is added/edited/removed.
+  goalProgress: Record<ID, GoalProgress>
   isLoadingGoals: boolean
   loadGoals: () => Promise<void>
   addGoal: (input: NewGoalInput) => Promise<Goal>
@@ -107,6 +124,11 @@ interface GoalState {
 
   // --- goal tree (consumed by the Goal Detail View via useGoalTree) ---
   currentGoalTree: GoalTree | null
+  // Per-subgoal task-completion momentum for the on-screen tree, keyed by
+  // subgoalId, computed by the engine from the tree the store already holds.
+  // Each SubgoalSection reads its own entry to draw a progress ring. Rebuilt
+  // every time currentGoalTree is (re)assembled so the two never disagree.
+  subgoalProgress: Record<ID, SubgoalProgress>
   isLoadingTree: boolean
   loadGoalTree: (id: ID) => Promise<void>
 
@@ -129,11 +151,30 @@ export const useGoalStore = create<GoalState>()((set, get) => {
   // any subgoal/milestone/task mutation so the Detail View reflects it. Reads
   // the goal id from the currently-loaded tree, since every such mutation
   // happens while that goal is on screen.
+  // Derive each subgoal's task-completion progress from an assembled tree. A
+  // subgoal's tasks are its loose tasks plus every task across its milestones —
+  // the tree already holds them, so this needs no extra DB read. The engine does
+  // the math; this only gathers the inputs and keys the result by subgoalId.
+  const subgoalProgressFromTree = (
+    tree: GoalTree | null,
+  ): Record<ID, SubgoalProgress> => {
+    const result: Record<ID, SubgoalProgress> = {}
+    if (!tree) return result
+    for (const st of tree.subgoals) {
+      const tasks = [
+        ...st.looseTasks,
+        ...st.milestones.flatMap((m) => m.tasks),
+      ]
+      result[st.subgoal.id] = computeSubgoalProgress(tasks)
+    }
+    return result
+  }
+
   const refreshCurrentTree = async () => {
     const goalId = get().currentGoalTree?.goal.id
     if (goalId) {
-      const tree = await getGoalTree(goalId)
-      set({ currentGoalTree: tree ?? null })
+      const tree = (await getGoalTree(goalId)) ?? null
+      set({ currentGoalTree: tree, subgoalProgress: subgoalProgressFromTree(tree) })
     }
   }
 
@@ -177,6 +218,46 @@ export const useGoalStore = create<GoalState>()((set, get) => {
     })
   }
 
+  // Reload the goal list and recompute each goal's task-completion progress in
+  // one pass, then set both together so a card and its ring never disagree. The
+  // per-goal task fetch + engine math is the only place goalProgress is built;
+  // every goal-list mutation routes through here. Cheap at this scale (tiny
+  // tables); revisit if the goal/task counts ever grow large.
+  const refreshGoalsAndProgress = async () => {
+    const goals = await getAllGoals()
+    const entries = await Promise.all(
+      goals.map(async (goal): Promise<[ID, GoalProgress]> => {
+        const tasks = await getTasksByGoalId(goal.id)
+        return [goal.id, computeGoalProgress(tasks)]
+      }),
+    )
+    set({ goals, goalProgress: Object.fromEntries(entries) })
+  }
+
+  // Apply the milestone auto-completion rule after a task changes: a milestone
+  // is completed when ALL its tasks are completed, and re-opens (-> active) when
+  // one is un-done. Only writes on an actual transition, so a no-op toggle costs
+  // nothing. Preserves any other status (e.g. a future Phase-3 'locked') unless
+  // the tasks now demand 'completed'. completedAt is stamped/cleared to match.
+  const reconcileMilestone = async (milestoneId: ID) => {
+    const [milestone, tasks] = await Promise.all([
+      getMilestoneById(milestoneId),
+      getTasksByMilestoneId(milestoneId),
+    ])
+    if (!milestone) return
+
+    const shouldComplete = isMilestoneComplete(tasks)
+    const isComplete = milestone.status === 'completed'
+    if (shouldComplete === isComplete) return // already in the right state
+
+    await updateMilestone(
+      milestone.id,
+      shouldComplete
+        ? { status: 'completed', completedAt: new Date().toISOString() }
+        : { status: 'active', completedAt: undefined },
+    )
+  }
+
   // Next display position among a set of siblings: max(order)+1, which is
   // collision-proof even if the existing orders have gaps.
   const nextOrder = (orders: number[]): number =>
@@ -185,12 +266,13 @@ export const useGoalStore = create<GoalState>()((set, get) => {
   return {
     // --- goal list ---
     goals: [],
+    goalProgress: {},
     isLoadingGoals: false,
 
     loadGoals: async () => {
       set({ isLoadingGoals: true })
       try {
-        set({ goals: await getAllGoals() })
+        await refreshGoalsAndProgress()
       } finally {
         set({ isLoadingGoals: false })
       }
@@ -198,13 +280,13 @@ export const useGoalStore = create<GoalState>()((set, get) => {
 
     addGoal: async (input) => {
       const goal = await createGoal(input)
-      set({ goals: await getAllGoals() })
+      await refreshGoalsAndProgress()
       return goal
     },
 
     editGoal: async (id, changes) => {
       await updateGoal(id, changes)
-      set({ goals: await getAllGoals() })
+      await refreshGoalsAndProgress()
       // If this goal is the one open in the Detail View, refresh its tree too.
       if (get().currentGoalTree?.goal.id === id) await refreshCurrentTree()
     },
@@ -213,7 +295,7 @@ export const useGoalStore = create<GoalState>()((set, get) => {
     // descendants/dependencies. Safe to leave until the dependency engine exists.
     removeGoal: async (id) => {
       await deleteGoal(id)
-      set({ goals: await getAllGoals() })
+      await refreshGoalsAndProgress()
     },
 
     // --- dashboard (today + overdue + upcoming) ---
@@ -243,15 +325,19 @@ export const useGoalStore = create<GoalState>()((set, get) => {
 
     // --- goal tree ---
     currentGoalTree: null,
+    subgoalProgress: {},
     isLoadingTree: false,
 
     // Blanks the tree first (avoids a stale-goal flash when navigating between
     // detail pages); in-place refreshes after a mutation use refreshCurrentTree.
     loadGoalTree: async (id) => {
-      set({ isLoadingTree: true, currentGoalTree: null })
+      set({ isLoadingTree: true, currentGoalTree: null, subgoalProgress: {} })
       try {
-        const tree = await getGoalTree(id)
-        set({ currentGoalTree: tree ?? null })
+        const tree = (await getGoalTree(id)) ?? null
+        set({
+          currentGoalTree: tree,
+          subgoalProgress: subgoalProgressFromTree(tree),
+        })
       } finally {
         set({ isLoadingTree: false })
       }
@@ -303,6 +389,8 @@ export const useGoalStore = create<GoalState>()((set, get) => {
         .map((t) => t.order)
       const order = nextOrder(groupOrders)
       const task = await createTask({ ...input, order })
+      // A new (pending) task under a completed milestone must re-open it.
+      if (input.milestoneId) await reconcileMilestone(input.milestoneId)
       // Refresh both surfaces: the goal tree (Detail View) and the dashboard
       // windows. One uniform invariant — every task mutation refreshes both, and
       // each refresher no-ops cheaply for the view that isn't mounted.
@@ -310,11 +398,27 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       return task
     },
     editTask: async (id, changes) => {
+      // Capture the task's milestone BEFORE the edit: an edit can change status
+      // (affecting completeness) or move the task to a different milestone, so
+      // both the old and the new milestone may need reconciling.
+      const before = await getTaskById(id)
       await updateTask(id, changes)
+      const affected = new Set<ID>()
+      if (before?.milestoneId) affected.add(before.milestoneId)
+      // 'milestoneId' present in changes means it was (re)assigned, even to
+      // undefined; absent means it stayed put.
+      const newMilestoneId =
+        'milestoneId' in changes ? changes.milestoneId : before?.milestoneId
+      if (newMilestoneId) affected.add(newMilestoneId)
+      await Promise.all([...affected].map(reconcileMilestone))
       await Promise.all([refreshCurrentTree(), refreshDashboard()])
     },
     removeTask: async (id) => {
+      // Removing a task can complete its milestone (if it was the last open
+      // one). Read the milestone before the row is gone.
+      const before = await getTaskById(id)
       await deleteTask(id)
+      if (before?.milestoneId) await reconcileMilestone(before.milestoneId)
       await Promise.all([refreshCurrentTree(), refreshDashboard()])
     },
 
@@ -330,6 +434,10 @@ export const useGoalStore = create<GoalState>()((set, get) => {
           ? { status: 'completed', completedAt: new Date().toISOString() }
           : { status: 'pending', completedAt: undefined },
       )
+      // Auto-complete (or re-open) the parent milestone per the spec'd rule.
+      // Loose tasks (no milestoneId) have no milestone to reconcile. Run before
+      // the refreshes so the tree picks up the milestone's new status too.
+      if (task.milestoneId) await reconcileMilestone(task.milestoneId)
       await Promise.all([refreshCurrentTree(), refreshDashboard()])
     },
   }

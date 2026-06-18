@@ -1,7 +1,11 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '@/database/db';
-import { getGoalTree, getTaskLineages } from './hierarchyRepository';
+import {
+  getGoalTree,
+  getTaskLineages,
+  getTasksByGoalId,
+} from './hierarchyRepository';
 import { createGoal, type CreateGoalInput } from './goalRepository';
 import { createSubgoal } from './subgoalRepository';
 import { createMilestone } from './milestoneRepository';
@@ -194,5 +198,31 @@ describe('hierarchyRepository.getTaskLineages', () => {
 
   it('returns an empty map for no tasks', async () => {
     expect(await getTaskLineages([])).toEqual({});
+  });
+});
+
+describe('hierarchyRepository.getTasksByGoalId', () => {
+  it('flattens every task across all of a goal\'s subgoals', async () => {
+    const goal = await createGoal(makeGoalInput());
+    const subA = await createSubgoal(makeSubgoalInput(goal.id, { order: 0 }));
+    const subB = await createSubgoal(makeSubgoalInput(goal.id, { order: 1 }));
+    await createTask(makeTaskInput(subA.id, { title: 'a1', order: 0 }));
+    await createTask(makeTaskInput(subA.id, { title: 'a2', order: 1 }));
+    await createTask(makeTaskInput(subB.id, { title: 'b1', order: 0 }));
+
+    const tasks = await getTasksByGoalId(goal.id);
+
+    expect(tasks.map((t) => t.title).sort()).toEqual(['a1', 'a2', 'b1']);
+  });
+
+  it('returns an empty array for a goal with no tasks', async () => {
+    const goal = await createGoal(makeGoalInput());
+    await createSubgoal(makeSubgoalInput(goal.id, { order: 0 }));
+
+    expect(await getTasksByGoalId(goal.id)).toEqual([]);
+  });
+
+  it('returns an empty array for an unknown goalId', async () => {
+    expect(await getTasksByGoalId('does-not-exist')).toEqual([]);
   });
 });
