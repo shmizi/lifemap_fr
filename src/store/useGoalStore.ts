@@ -13,8 +13,12 @@
 // in later phases.
 
 import { create } from 'zustand'
-import { startOfDay, endOfDay } from 'date-fns'
+import { format } from 'date-fns'
 import type { Goal, Subgoal, Milestone, Task, GoalTree, ID } from '@/core/types'
+import {
+  computeTodayProgress,
+  type TodayProgress,
+} from '@/engine/progress/computeTodayProgress'
 import {
   getAllGoals,
   createGoal,
@@ -68,6 +72,9 @@ interface GoalState {
 
   // --- today (dashboard) ---
   todaysTasks: Task[]
+  // Momentum for today's scheduled tasks, computed by the engine (never inline).
+  // Refreshed alongside todaysTasks; MomentumBar reads it.
+  todayProgress: TodayProgress
   isLoadingToday: boolean
   loadTodaysTasks: () => Promise<void>
 
@@ -106,6 +113,17 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       const tree = await getGoalTree(goalId)
       set({ currentGoalTree: tree ?? null })
     }
+  }
+
+  // Re-fetch the Today list in place (no loading-flag flip -> no flicker),
+  // mirroring refreshCurrentTree. Called after any task mutation so the
+  // dashboard's Today list reflects it without a remount. Keys off a date-only
+  // LOCAL day (scheduledDate is stored date-only YYYY-MM-DD), and recomputes
+  // today's momentum via the engine in the same pass so the two never drift.
+  const refreshTodaysTasks = async () => {
+    const today = format(new Date(), 'yyyy-MM-dd')
+    const todaysTasks = await getTasksScheduledBetween(today, today)
+    set({ todaysTasks, todayProgress: computeTodayProgress(todaysTasks) })
   }
 
   // Next display position among a set of siblings: max(order)+1, which is
@@ -149,19 +167,16 @@ export const useGoalStore = create<GoalState>()((set, get) => {
 
     // --- today (dashboard) ---
     todaysTasks: [],
+    todayProgress: { completed: 0, total: 0, percent: 0 },
     isLoadingToday: false,
 
-    // Load tasks scheduled for today, where "today" is the user's local day.
-    // date-fns startOfDay/endOfDay give local midnight and 23:59:59.999; we hand
-    // their ISO strings to the repository's range getter. No filtering/derived
-    // math here — the store just holds what the repo returns.
+    // Initial load of today's tasks (flips the loading flag for the first paint).
+    // The date-only local-day logic lives in refreshTodaysTasks so there is one
+    // source of truth; this only wraps it with the loading flag.
     loadTodaysTasks: async () => {
       set({ isLoadingToday: true })
       try {
-        const now = new Date()
-        const start = startOfDay(now).toISOString()
-        const end = endOfDay(now).toISOString()
-        set({ todaysTasks: await getTasksScheduledBetween(start, end) })
+        await refreshTodaysTasks()
       } finally {
         set({ isLoadingToday: false })
       }
@@ -234,16 +249,19 @@ export const useGoalStore = create<GoalState>()((set, get) => {
         .map((t) => t.order)
       const order = nextOrder(groupOrders)
       const task = await createTask({ ...input, order })
-      await refreshCurrentTree()
+      // Refresh both surfaces: the goal tree (Detail View) and the Today list
+      // (dashboard). One uniform invariant — every task mutation refreshes both,
+      // and each refresher no-ops cheaply for the view that isn't mounted.
+      await Promise.all([refreshCurrentTree(), refreshTodaysTasks()])
       return task
     },
     editTask: async (id, changes) => {
       await updateTask(id, changes)
-      await refreshCurrentTree()
+      await Promise.all([refreshCurrentTree(), refreshTodaysTasks()])
     },
     removeTask: async (id) => {
       await deleteTask(id)
-      await refreshCurrentTree()
+      await Promise.all([refreshCurrentTree(), refreshTodaysTasks()])
     },
 
     // Flip a task between completed and pending. Completing stamps completedAt
@@ -258,7 +276,7 @@ export const useGoalStore = create<GoalState>()((set, get) => {
           ? { status: 'completed', completedAt: new Date().toISOString() }
           : { status: 'pending', completedAt: undefined },
       )
-      await refreshCurrentTree()
+      await Promise.all([refreshCurrentTree(), refreshTodaysTasks()])
     },
   }
 })

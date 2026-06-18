@@ -8,6 +8,7 @@ import {
   getTasksByMilestoneId,
   getTasksByStatus,
   getTasksByScheduledDate,
+  getTasksScheduledBetween,
   updateTask,
   deleteTask,
   type CreateTaskInput,
@@ -95,7 +96,36 @@ describe('taskRepository', () => {
     expect(result.map((t) => t.title)).toEqual(['today']);
   });
 
-it('updateTask patches fields, refreshes updatedAt, preserves createdAt, throws on missing id', async () => {
+  it('getTasksScheduledBetween returns rows within inclusive bounds, ascending, excluding unscheduled', async () => {
+    // scheduledDate is written date-only (YYYY-MM-DD) — the canonical format.
+    // Inserted shuffled on purpose: proves the result is ordered by
+    // scheduledDate, not by insertion order.
+    await createTask(makeInput({ scheduledDate: '2026-06-14', title: 'd14' })); // == end  -> included (upper bound inclusive)
+    await createTask(makeInput({ scheduledDate: '2026-06-08', title: 'd08' })); // <  start -> excluded
+    await createTask(makeInput({ scheduledDate: '2026-06-10', title: 'd10' })); // == start -> included (lower bound inclusive)
+    await createTask(makeInput({ scheduledDate: '2026-06-16', title: 'd16' })); // >  end   -> excluded
+    await createTask(makeInput({ scheduledDate: '2026-06-12', title: 'd12' })); // middle  -> included
+    await createTask(makeInput({ title: 'unscheduled' }));                      // no scheduledDate -> excluded
+
+    const result = await getTasksScheduledBetween('2026-06-10', '2026-06-14');
+
+    // Both ends present, outside-range and unscheduled absent, ascending order.
+    expect(result.map((t) => t.title)).toEqual(['d10', 'd12', 'd14']);
+  });
+
+  it('getTasksScheduledBetween with start === end is the single-day "today" query', async () => {
+    // A date-only Today lookup collapses to a one-day window: both bounds equal
+    // the same calendar day. This is the path loadTodaysTasks drives.
+    await createTask(makeInput({ scheduledDate: '2026-06-14', title: 'yesterday' }));
+    await createTask(makeInput({ scheduledDate: '2026-06-15', title: 'today' }));
+    await createTask(makeInput({ scheduledDate: '2026-06-16', title: 'tomorrow' }));
+
+    const result = await getTasksScheduledBetween('2026-06-15', '2026-06-15');
+
+    expect(result.map((t) => t.title)).toEqual(['today']);
+  });
+
+  it('updateTask patches fields, refreshes updatedAt, preserves createdAt, throws on missing id', async () => {
     // Fake ONLY Date — not setTimeout/queueMicrotask. fake-indexeddb relies on
     // the real async scheduler to flush transactions, so faking all timers would
     // deadlock every await db.* call. This gives deterministic timestamps while
