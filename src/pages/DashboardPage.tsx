@@ -12,6 +12,7 @@ import { useEffect } from 'react'
 import { useGoalStore } from '@/store/useGoalStore'
 import { MomentumBar } from '@/components/progress/MomentumBar'
 import { PriorityTaskPanel } from '@/components/priority/PriorityTaskPanel'
+import { GoalProgressSnapshot } from '@/components/dashboard/GoalProgressSnapshot'
 import { DashboardTaskSection } from '@/features/dashboard/DashboardTaskSection'
 
 export function DashboardPage() {
@@ -21,6 +22,8 @@ export function DashboardPage() {
   const taskLineages = useGoalStore((s) => s.taskLineages)
   const todayEffort = useGoalStore((s) => s.todayEffort)
   const topPriorityTasks = useGoalStore((s) => s.topPriorityTasks)
+  const goals = useGoalStore((s) => s.goals)
+  const goalProgress = useGoalStore((s) => s.goalProgress)
   const isLoadingDashboard = useGoalStore((s) => s.isLoadingDashboard)
   const loadDashboard = useGoalStore((s) => s.loadDashboard)
 
@@ -78,6 +81,10 @@ export function DashboardPage() {
           isLoading={isLoadingDashboard}
           emptyText="Nothing scheduled in the next week."
         />
+
+        {/* A glance-able per-goal progress list, populated on dashboard load via
+            the same goalProgress computation the Goals list uses. */}
+        <GoalProgressSnapshot goals={goals} progressByGoalId={goalProgress} />
       </div>
     </section>
   )
