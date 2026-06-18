@@ -9,6 +9,7 @@ import {
   getTasksByStatus,
   getTasksByScheduledDate,
   getTasksScheduledBetween,
+  getTasksScheduledBefore,
   updateTask,
   deleteTask,
   type CreateTaskInput,
@@ -123,6 +124,21 @@ describe('taskRepository', () => {
     const result = await getTasksScheduledBetween('2026-06-15', '2026-06-15');
 
     expect(result.map((t) => t.title)).toEqual(['today']);
+  });
+
+  it('getTasksScheduledBefore returns strictly-earlier rows, ascending, excluding the bound and unscheduled', async () => {
+    // The dashboard's overdue list drives this: everything scheduled before
+    // today. The bound is EXCLUSIVE, so a task on the bound date is not "before".
+    await createTask(makeInput({ scheduledDate: '2026-06-12', title: 'd12' })); // <  before -> included
+    await createTask(makeInput({ scheduledDate: '2026-06-15', title: 'd15' })); // == before -> excluded (exclusive)
+    await createTask(makeInput({ scheduledDate: '2026-06-16', title: 'd16' })); // >  before -> excluded
+    await createTask(makeInput({ scheduledDate: '2026-06-10', title: 'd10' })); // <  before -> included
+    await createTask(makeInput({ title: 'unscheduled' }));                      // no scheduledDate -> excluded
+
+    const result = await getTasksScheduledBefore('2026-06-15');
+
+    // Only the two earlier rows, oldest first; bound date and unscheduled absent.
+    expect(result.map((t) => t.title)).toEqual(['d10', 'd12']);
   });
 
   it('updateTask patches fields, refreshes updatedAt, preserves createdAt, throws on missing id', async () => {
