@@ -11,6 +11,10 @@ export type SubgoalStatus = 'not_started' | 'active' | 'completed' | 'at_risk';
 export type MilestoneStatus = 'locked' | 'active' | 'completed';
 export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'skipped';
 export type Priority = 'low' | 'medium' | 'high' | 'critical';
+// Coarse, closed effort category for a task — a quick "how big is this" pick,
+// NOT a precise time estimate (that is `estimatedMinutes`, which stays separate).
+// Used to weight the dashboard's effort-based momentum. See EFFORT_WEIGHTS.
+export type EffortSize = 'XS' | 'S' | 'M' | 'L' | 'XL';
 export type GoalCategory =
   | 'education' | 'career' | 'health'
   | 'skills' | 'personal' | 'financial' | 'other';
@@ -63,7 +67,8 @@ export interface Task {
   priority: Priority;
   dueDate?: ISODate;
   scheduledDate?: ISODate;
-  estimatedMinutes?: number;
+  estimatedMinutes?: number;           // precise time estimate (reserved; AI scheduling)
+  effort?: EffortSize;                 // coarse size for effort-based momentum weighting
   isRecurring: boolean;
   completedAt?: ISODate;
   order: number;

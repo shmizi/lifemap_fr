@@ -8,11 +8,13 @@
 // are preserved.
 
 import { useEffect, useState, type ReactNode } from 'react'
-import type { ID, Priority, Task } from '@/core/types'
+import type { EffortSize, ID, Priority, Task } from '@/core/types'
 import {
   DEFAULT_TASK_STATUS,
   DEFAULT_TASK_PRIORITY,
+  DEFAULT_TASK_EFFORT,
   PRIORITY_OPTIONS,
+  EFFORT_OPTIONS,
 } from '@/core/constants'
 import { useGoalStore } from '@/store/useGoalStore'
 import { Modal } from '@/components/ui/Modal'
@@ -41,6 +43,7 @@ export function TaskCreationModal({
 
   const [title, setTitle] = useState('')
   const [priority, setPriority] = useState<Priority>(DEFAULT_TASK_PRIORITY)
+  const [effort, setEffort] = useState<EffortSize>(DEFAULT_TASK_EFFORT)
   const [dueDate, setDueDate] = useState('')
   // scheduledDate is stored date-only (YYYY-MM-DD), which is exactly what an
   // <input type="date"> emits — no parsing/formatting needed. Setting it puts
@@ -53,6 +56,7 @@ export function TaskCreationModal({
     if (!open) return
     setTitle(task?.title ?? '')
     setPriority(task?.priority ?? DEFAULT_TASK_PRIORITY)
+    setEffort(task?.effort ?? DEFAULT_TASK_EFFORT)
     setDueDate(task?.dueDate ?? '')
     setScheduledDate(task?.scheduledDate ?? '')
     setDescription(task?.description ?? '')
@@ -74,6 +78,7 @@ export function TaskCreationModal({
         await editTask(task.id, {
           title: title.trim(),
           priority,
+          effort,
           dueDate: dueDate || undefined,
           scheduledDate: scheduledDate || undefined,
           description: description.trim() || undefined,
@@ -84,6 +89,7 @@ export function TaskCreationModal({
           title: title.trim(),
           status: DEFAULT_TASK_STATUS,
           priority,
+          effort,
           isRecurring: false,
           ...(milestoneId ? { milestoneId } : {}),
           ...(dueDate ? { dueDate } : {}),
@@ -130,15 +136,29 @@ export function TaskCreationModal({
             </select>
           </Field>
 
-          <Field label="Due date (optional)">
-            <input
-              type="date"
-              value={dueDate}
-              onChange={(e) => setDueDate(e.target.value)}
+          <Field label="Effort">
+            <select
+              value={effort}
+              onChange={(e) => setEffort(e.target.value as EffortSize)}
               className={inputClass}
-            />
+            >
+              {EFFORT_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
           </Field>
         </div>
+
+        <Field label="Due date (optional)">
+          <input
+            type="date"
+            value={dueDate}
+            onChange={(e) => setDueDate(e.target.value)}
+            className={inputClass}
+          />
+        </Field>
 
         <Field label="Scheduled for (optional)">
           <input

@@ -19,7 +19,7 @@ export function DashboardPage() {
   const todaysTasks = useGoalStore((s) => s.todaysTasks)
   const thisWeekTasks = useGoalStore((s) => s.thisWeekTasks)
   const taskLineages = useGoalStore((s) => s.taskLineages)
-  const todayProgress = useGoalStore((s) => s.todayProgress)
+  const todayEffort = useGoalStore((s) => s.todayEffort)
   const topPriorityTasks = useGoalStore((s) => s.topPriorityTasks)
   const isLoadingDashboard = useGoalStore((s) => s.isLoadingDashboard)
   const loadDashboard = useGoalStore((s) => s.loadDashboard)
@@ -38,9 +38,9 @@ export function DashboardPage() {
 
       <div className="mt-6 space-y-4">
         <MomentumBar
-          completed={todayProgress.completed}
-          total={todayProgress.total}
-          percent={todayProgress.percent}
+          completed={todayEffort.completed}
+          total={todayEffort.total}
+          percent={todayEffort.percent}
         />
 
         {/* A focus suggestion drawn from ALL goals (not just today's schedule),
