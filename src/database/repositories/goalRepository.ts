@@ -17,6 +17,12 @@ import { db } from '../db';
 import type { Goal, ID, GoalStatus } from '@/core/types';
 
 /**
+ * Fields the CALLER provides. id/createdAt/updatedAt are generated here, so they
+ * are omitted.
+ */
+export type CreateGoalInput = Omit<Goal, 'id' | 'createdAt' | 'updatedAt'>;
+
+/**
  * Create a new goal.
  *
  * WHY: callers describe a goal in domain terms (title, category, target date)
@@ -24,9 +30,7 @@ import type { Goal, ID, GoalStatus } from '@/core/types';
  * timestamps. We own those here so every goal in the table is well-formed and
  * the rest of the app can trust that id/createdAt/updatedAt always exist.
  */
-export async function createGoal(
-  data: Omit<Goal, 'id' | 'createdAt' | 'updatedAt'>,
-): Promise<Goal> {
+export async function createGoal(data: CreateGoalInput): Promise<Goal> {
   // ISO 8601 strings are sortable as plain text, which is exactly what the
   // createdAt index relies on for ordering — no Date parsing needed at query time.
   const now = new Date().toISOString();
