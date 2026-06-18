@@ -344,13 +344,18 @@ export const useGoalStore = create<GoalState>()((set, get) => {
     isLoadingDashboard: false,
 
     // Initial load of the dashboard (flips the loading flag for the first paint).
-    // Loads the scheduled-task windows and the cross-goal priority list together;
-    // each refresher owns its own data source. The window/local-day logic lives
-    // in refreshDashboard so there is one source of truth.
+    // Loads the scheduled-task windows, the cross-goal priority list, AND the
+    // per-goal progress (for the Goal Progress snapshot) together. Each refresher
+    // owns its own data source; refreshGoalsAndProgress is reused as-is so the
+    // snapshot is populated on Dashboard mount, not only after a Goals-list visit.
     loadDashboard: async () => {
       set({ isLoadingDashboard: true })
       try {
-        await Promise.all([refreshDashboard(), refreshTopPriority()])
+        await Promise.all([
+          refreshDashboard(),
+          refreshTopPriority(),
+          refreshGoalsAndProgress(),
+        ])
       } finally {
         set({ isLoadingDashboard: false })
       }
