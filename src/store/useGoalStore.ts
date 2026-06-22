@@ -467,8 +467,8 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       await updateMilestone(id, changes)
       await refreshCurrentTree()
     },
-    // deleteMilestone now cascades its tasks in the repository.
-    // TODO(Phase 3): clear Dependency rows referencing the deleted tasks.
+    // deleteMilestone REHOMES its tasks (clears milestoneId -> loose under the
+    // subgoal) and deletes only the milestone row; no task data is lost.
     removeMilestone: async (id) => {
       await deleteMilestone(id)
       await refreshCurrentTree()

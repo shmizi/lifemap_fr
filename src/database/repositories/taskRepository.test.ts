@@ -168,4 +168,33 @@ describe('taskRepository', () => {
 
     expect(await getTaskById(created.id)).toBeUndefined();
   });
+
+  it('updateTask with milestoneId: undefined CLEARS the property and its index entry', async () => {
+    // This is the behavior the milestone-rehome path depends on: passing
+    // `undefined` to Dexie's update() must DELETE the property (not store a stale
+    // value), which also removes the row from the milestoneId index.
+    const created = await createTask(
+      makeInput({ subgoalId: 'sub-1', milestoneId: 'm-1' }),
+    );
+
+    // Sanity: indexed under the milestone before clearing.
+    expect(
+      (await getTasksByMilestoneId('m-1')).map((t) => t.id),
+    ).toEqual([created.id]);
+
+    await updateTask(created.id, { milestoneId: undefined });
+
+    // Property is gone from the stored row...
+    const after = await getTaskById(created.id);
+    expect(after).toBeDefined();
+    expect(after!.milestoneId).toBeUndefined();
+    expect('milestoneId' in after!).toBe(false); // truly deleted, not set to undefined
+
+    // ...the milestoneId index no longer returns it...
+    expect(await getTasksByMilestoneId('m-1')).toEqual([]);
+    // ...but it is still reachable via its (unchanged) subgoal.
+    expect((await getTasksBySubgoalId('sub-1')).map((t) => t.id)).toEqual([
+      created.id,
+    ]);
+  });
 });
