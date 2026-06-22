@@ -133,8 +133,8 @@ describe('deleteSubgoal (cascade)', () => {
   });
 });
 
-describe('deleteMilestone (cascade)', () => {
-  it('removes the milestone and its tasks, sparing loose and other-milestone tasks', async () => {
+describe('deleteMilestone (rehome, not destroy)', () => {
+  it('rehomes its tasks to the subgoal as loose tasks, deletes only the milestone', async () => {
     const goal = await createGoal(makeGoalInput());
     const sub = await createSubgoal(makeSubgoalInput(goal.id));
     const milestone = await createMilestone(makeMilestoneInput(sub.id, { order: 0 }));
@@ -142,22 +142,47 @@ describe('deleteMilestone (cascade)', () => {
       makeMilestoneInput(sub.id, { order: 1 }),
     );
 
-    await createTask(makeTaskInput(sub.id, { milestoneId: milestone.id }));
-    await createTask(makeTaskInput(sub.id, { milestoneId: milestone.id }));
-    const otherTask = await createTask(
-      makeTaskInput(sub.id, { milestoneId: otherMilestone.id }),
+    // One pre-existing loose task (order 0) so we can check the rehomed tasks
+    // append AFTER it without colliding.
+    const looseTask = await createTask(makeTaskInput(sub.id, { order: 0 }));
+    // Milestone tasks carry their own per-milestone order (0, 1).
+    const taskA = await createTask(
+      makeTaskInput(sub.id, { milestoneId: milestone.id, order: 0 }),
     );
-    const looseTask = await createTask(makeTaskInput(sub.id)); // no milestoneId
+    const taskB = await createTask(
+      makeTaskInput(sub.id, { milestoneId: milestone.id, order: 1 }),
+    );
+    const otherTask = await createTask(
+      makeTaskInput(sub.id, { milestoneId: otherMilestone.id, order: 0 }),
+    );
 
     await deleteMilestone(milestone.id);
 
+    // Milestone row gone; its tasks NOT deleted.
     expect(await db.milestones.get(milestone.id)).toBeUndefined();
+    const a = await db.tasks.get(taskA.id);
+    const b = await db.tasks.get(taskB.id);
+    expect(a).toBeDefined();
+    expect(b).toBeDefined();
+
+    // milestoneId cleared (and removed from the index); subgoalId unchanged.
+    expect(a!.milestoneId).toBeUndefined();
+    expect(b!.milestoneId).toBeUndefined();
+    expect(a!.subgoalId).toBe(sub.id);
+    expect(b!.subgoalId).toBe(sub.id);
     expect(await db.tasks.where('milestoneId').equals(milestone.id).count()).toBe(0);
 
-    // The other milestone, its task, and the loose task are untouched.
+    // Rehomed orders append after the existing loose max (0) -> 1, 2; no collision
+    // with looseTask (still 0), and they keep their relative A-before-B order.
+    const looseOrders = [a!.order, b!.order, (await db.tasks.get(looseTask.id))!.order];
+    expect(new Set(looseOrders).size).toBe(3); // all distinct
+    expect(a!.order).toBe(1);
+    expect(b!.order).toBe(2);
+
+    // The other milestone and its task are untouched; subgoal survives.
     expect(await db.milestones.get(otherMilestone.id)).toBeDefined();
-    expect(await db.tasks.get(otherTask.id)).toBeDefined();
-    expect(await db.tasks.get(looseTask.id)).toBeDefined();
+    const other = await db.tasks.get(otherTask.id);
+    expect(other!.milestoneId).toBe(otherMilestone.id);
     expect(await db.subgoals.get(sub.id)).toBeDefined();
   });
 });

@@ -88,13 +88,56 @@ export async function updateMilestone(
 }
 
 export async function deleteMilestone(id: ID): Promise<void> {
-  // Delete a milestone AND the tasks grouped under it. Wrapped in one rw
-  // transaction so it is all-or-nothing. Leaving the tasks behind would strand
-  // them with a dangling milestoneId — present in their subgoal's task list but
-  // attached to no rendered milestone, so they would silently vanish from the
-  // goal tree while still counting toward progress.
+  // Delete the milestone but REHOME its tasks rather than destroy them: a
+  // milestone is an organizational checkpoint, not a structural container, so an
+  // accidental delete must not erase task history/progress. Each task keeps its
+  // subgoalId and becomes a loose task (milestoneId cleared); it then renders in
+  // the subgoal's "Other tasks" section, which already supports milestone-less
+  // tasks end to end. (Contrast deleteGoal/deleteSubgoal, which DO cascade-delete
+  // their subtrees.)
+  //
+  // All of it runs in one rw transaction so the rehome + milestone removal is
+  // all-or-nothing.
+  //
+  // `order` is scoped per (subgoal, milestone-group): loose tasks form their own
+  // order sequence. We re-sequence the rehomed tasks onto the END of that loose
+  // sequence rather than keeping their old per-milestone order values, which
+  // would collide with existing loose tasks.
+  //
+  // Clearing milestoneId: passing `undefined` to Dexie's update() DELETES the
+  // property, which also removes the row from the milestoneId index (verified by
+  // a dedicated test in taskRepository.test.ts).
   await db.transaction('rw', db.milestones, db.tasks, async () => {
-    await db.tasks.where('milestoneId').equals(id).delete();
+    const milestone = await db.milestones.get(id);
+    if (!milestone) return; // unknown id -> nothing to do (idempotent)
+
+    const subgoalTasks = await db.tasks
+      .where('subgoalId')
+      .equals(milestone.subgoalId)
+      .toArray();
+
+    // Highest existing loose-task order under this subgoal; rehomed tasks append
+    // after it. -1 so the first appended task lands at 0 when there are none.
+    const looseOrders = subgoalTasks
+      .filter((t) => t.milestoneId === undefined)
+      .map((t) => t.order);
+    let nextOrder = looseOrders.length === 0 ? 0 : Math.max(...looseOrders) + 1;
+
+    // Rehome this milestone's tasks in their current order, so their relative
+    // sequence is preserved as they move into the loose group.
+    const milestoneTasks = subgoalTasks
+      .filter((t) => t.milestoneId === id)
+      .sort((a, b) => a.order - b.order);
+    const now = new Date().toISOString();
+    for (const task of milestoneTasks) {
+      await db.tasks.update(task.id, {
+        milestoneId: undefined,
+        order: nextOrder,
+        updatedAt: now,
+      });
+      nextOrder += 1;
+    }
+
     await db.milestones.delete(id);
   });
 }
