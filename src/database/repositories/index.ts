@@ -7,6 +7,6 @@ export * from './subgoalRepository';
 export * from './milestoneRepository';
 export * from './taskRepository';
 export * from './hierarchyRepository';
-export { dependencyRepository } from './dependencyRepository';
+export * from './dependencyRepository';
 export { profileRepository } from './profileRepository';
 export { snapshotRepository } from './snapshotRepository';
