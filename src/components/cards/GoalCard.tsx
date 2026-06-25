@@ -40,9 +40,14 @@ export function GoalCard({ goal }: GoalCardProps) {
   const progress = useGoalStore((s) => s.goalProgress[goal.id])
   // A goal with no tasks has no momentum to show — keep the card calm, no ring.
   const showRing = progress !== undefined && progress.total > 0
-  // Engine-computed pace health (same load pass as progress). Hidden for a goal
-  // with no tasks ('no_tasks') — nothing to be on/off track about yet.
+  // Engine-computed health (same load pass as progress). Carries TWO separate
+  // signals: pace (status/score) and the dependency "lagging foundation" note.
+  // Pace is hidden for a goal with no tasks ('no_tasks').
   const health = useGoalStore((s) => s.goalHealth[goal.id])
+  // The dependency note is meaningless for a finished goal (a completed/archived
+  // goal isn't waiting on any foundation), so it follows the same gating as the
+  // pace badge below.
+  const isFinished = goal.status === 'completed' || goal.status === 'archived'
 
   // Two-step delete: idle -> confirming -> (delete | cancel). The confirm step
   // matters because deletion is destructive and there is no undo.
@@ -74,10 +79,7 @@ export function GoalCard({ goal }: GoalCardProps) {
             {/* Pace health is meaningless for a finished goal — a completed or
                 archived goal is done, not "on track" — so the badge is hidden
                 for those (and for goals with no tasks to assess). */}
-            {health &&
-            health.status !== 'no_tasks' &&
-            goal.status !== 'completed' &&
-            goal.status !== 'archived' ? (
+            {health && health.status !== 'no_tasks' && !isFinished ? (
               <GoalHealthBadge status={health.status} />
             ) : null}
             <span className="rounded-full border border-app-border px-2.5 py-0.5 text-xs text-app-text-muted">
@@ -89,6 +91,18 @@ export function GoalCard({ goal }: GoalCardProps) {
         {goal.description ? (
           <p className="mt-2 line-clamp-2 text-sm text-app-text-muted">
             {goal.description}
+          </p>
+        ) : null}
+
+        {/* Dependency health signal — SEPARATE from the pace badge and explained
+            on its own line: a foundation subgoal is trailing the work that leans
+            on it. A calm amber nudge (not a red siren), hidden for finished goals.
+            Sits above the date row so it never overlaps the delete control. */}
+        {health?.laggingFoundation && !isFinished ? (
+          <p className="mt-3 text-xs text-amber-600">
+            Foundation lagging: {health.laggingFoundation.foundationTitle} is
+            trailing {health.laggingFoundation.dependentTitle}, which builds on
+            it.
           </p>
         ) : null}
 
