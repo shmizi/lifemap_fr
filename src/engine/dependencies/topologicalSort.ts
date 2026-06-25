@@ -1,12 +1,12 @@
-// topologicalSort — order a dependency graph so every prerequisite comes before
-// the thing it blocks (Phase 3).
+// topologicalSort — order a dependency graph so every supporter comes before the
+// thing it supports (Phase 3).
 //
 // PURE TypeScript: no React, no DB, no store. A Dependency edge fromId -> toId
-// means "fromId must complete before toId", so in the returned order fromId
-// always precedes toId. Uses Kahn's algorithm: repeatedly emit any node with no
-// remaining prerequisites (in-degree 0), then relax its successors. This also
-// reveals a cycle for free — if some nodes never reach in-degree 0, they are
-// tangled in a loop and cannot be placed.
+// means "fromId supports/strengthens toId" (a soft link), so in the returned
+// order a supporter precedes what it supports. Uses Kahn's algorithm: repeatedly
+// emit any node with no remaining upstream supporters (in-degree 0), then relax
+// its successors. This also reveals a cycle for free — if some nodes never reach
+// in-degree 0, they are tangled in a loop and cannot be placed.
 //
 // SCOPE: only nodes that participate in an edge are ordered (see collectNodes).
 // An entity with no dependencies is unconstrained; placing it is the caller's

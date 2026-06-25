@@ -62,8 +62,10 @@ export const DEFAULT_GOAL_PRIORITY: Priority = 'medium';
 export const DEFAULT_SUBGOAL_STATUS: SubgoalStatus = 'active';
 
 // A new milestone defaults to 'active' (available to work on). 'locked' is
-// reserved for dependency-gated milestones, which the dependency engine sets
-// automatically in Phase 3 — not something the user picks at creation.
+// PARKED, not used: Phase 3 dependencies are SOFT (they strengthen, they do not
+// block), so nothing hard-locks a milestone today and no code sets this status.
+// It is deliberately kept in the model as a future escape hatch for an explicit
+// hard-prerequisite mode — and is never something the user picks at creation.
 export const DEFAULT_MILESTONE_STATUS: MilestoneStatus = 'active';
 
 // A new task starts 'pending' at 'medium' priority, not recurring. The creation

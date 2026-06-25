@@ -31,9 +31,19 @@ export function GoalDetailPage() {
   // the (in practice unreachable) empty case.
   const { id = '' } = useParams<{ id: string }>()
   const { tree, isLoading } = useGoalTree(id)
-  // The subgoal dependency graph (loaded once here, passed down to each section).
+  // The subgoal dependency graph (loaded here, passed down to each section).
   // Edges are global across goals; a section filters to its own subgoal by id.
-  const { dependencies: subgoalDependencies } = useDependencyGraph('subgoal')
+  // Keyed on the goal's subgoal-id set so that deleting a subgoal (which
+  // cascade-removes its edges in the DB via useGoalStore) forces a reload here,
+  // dropping any now-dangling edges rather than showing a phantom "Unknown
+  // subgoal" row.
+  const subgoalIdsKey = tree
+    ? tree.subgoals.map((st) => st.subgoal.id).join(',')
+    : ''
+  const { dependencies: subgoalDependencies } = useDependencyGraph(
+    'subgoal',
+    subgoalIdsKey,
+  )
   // Whole-goal momentum, derived from the same tree by the store. Shown in the
   // header above the per-subgoal rings; hidden until the goal has tasks.
   const goalProgress = useGoalStore((s) => s.currentGoalProgress)

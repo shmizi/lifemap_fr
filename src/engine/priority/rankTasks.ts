@@ -9,8 +9,9 @@
 // I plan for today"; this answers "what most deserves attention right now,
 // scheduled or not". They are two lenses on the same task data.
 
-import type { Task } from '@/core/types'
+import type { ID, Task } from '@/core/types'
 import { scoreTask } from './scoreTask'
+import { dependencyBoost } from './dependencyBoost'
 
 export const DEFAULT_TOP_N = 3
 
@@ -20,14 +21,24 @@ function isOpen(task: Task): boolean {
   return task.status !== 'completed' && task.status !== 'skipped'
 }
 
+// supportCounts: active-support count per subgoalId (from
+// computeActiveSupportCounts). A task whose subgoal supports active subgoals gets
+// a small dependencyBoost on top of its intrinsic score. Passed AFTER topN to
+// preserve the existing positional call sites; defaults to {} (no boost).
 export function rankTasks(
   tasks: Task[],
   now: Date,
   topN: number = DEFAULT_TOP_N,
+  supportCounts: Record<ID, number> = {},
 ): Task[] {
   return tasks
     .filter(isOpen)
-    .map((task) => ({ task, score: scoreTask(task, now) }))
+    .map((task) => ({
+      task,
+      score:
+        scoreTask(task, now) +
+        dependencyBoost(supportCounts[task.subgoalId] ?? 0),
+    }))
     // Highest score first. Tie-break by createdAt (older first) so the order is
     // deterministic and a long-waiting task edges out a brand-new one.
     .sort(
