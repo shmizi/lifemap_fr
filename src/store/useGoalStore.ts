@@ -48,6 +48,13 @@ import {
   type WeeklyReviewData,
 } from '@/engine/review/computeWeeklyReview'
 import { computeStrengthenedFoundations } from '@/engine/review/computeStrengthenedFoundations'
+import { buildMilestonePrompt } from '@/engine/ai/prompts/milestones'
+import { parseMilestoneSuggestions } from '@/engine/ai/parsers/milestones'
+import type {
+  MilestoneSuggestion,
+  MilestoneSuggestionContext,
+} from '@/engine/ai/types'
+import { aiProvider } from '@/services/ai'
 import {
   getAllGoals,
   createGoal,
@@ -271,6 +278,21 @@ interface GoalState {
   currentRoadmap: RoadmapView | null
   isLoadingRoadmap: boolean
   loadRoadmap: (goalId: ID) => Promise<void>
+
+  // --- AI assistance (Phase 5) ---
+  // Ask the AI provider for milestone suggestions for one subgoal. READ-ONLY: it
+  // returns suggestions for the UI to present (accept/edit/reject); it writes
+  // nothing. Accepting a suggestion goes through the EXISTING addMilestone path
+  // with aiSuggested: true, so there is no separate AI write path. The store
+  // talks only to the AIProvider interface (services/ai) and the pure prompt/
+  // parser (engine/ai) — it never knows which model, or that a network exists.
+  // Unlike the best-effort refreshers, this is user-triggered and awaited, so a
+  // transport failure PROPAGATES to the caller (the modal shows it inline, like a
+  // failed save) rather than the calm background banner. A malformed response is
+  // not a failure: the parser yields [] and the user just adds milestones manually.
+  suggestMilestones: (
+    context: MilestoneSuggestionContext,
+  ) => Promise<MilestoneSuggestion[]>
 
   // --- cross-cutting error state ---
   // A single, calm, NON-FATAL message set when a background load or post-write
@@ -919,6 +941,16 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       } finally {
         set({ isLoadingRoadmap: false })
       }
+    },
+
+    // --- AI assistance ---
+    // Thin orchestration: build the prompt (pure), ask the provider (the only
+    // thing that "calls out"), parse the reply (pure, never throws). No store
+    // state is cached — the caller holds the returned suggestions while the user
+    // accepts/edits/rejects them. A provider rejection bubbles up to the caller.
+    suggestMilestones: async (context) => {
+      const response = await aiProvider.complete(buildMilestonePrompt(context))
+      return parseMilestoneSuggestions(response)
     },
   }
 })
