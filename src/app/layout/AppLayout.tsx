@@ -9,11 +9,16 @@
 import { Outlet } from 'react-router-dom'
 import { Sidebar } from '@/app/layout/Sidebar'
 import { Topbar } from '@/app/layout/Topbar'
+import { ErrorBanner } from '@/components/ui/ErrorBanner'
 import { useUIStore } from '@/store/useUIStore'
+import { useGoalStore } from '@/store/useGoalStore'
 import { LAYOUT } from '@/core/constants/layout'
 
 export function AppLayout() {
   const sidebarOpen = useUIStore((state) => state.sidebarOpen)
+  // A non-fatal data error surfaced once, app-wide, just under the Topbar.
+  const error = useGoalStore((state) => state.error)
+  const clearError = useGoalStore((state) => state.clearError)
 
   const sidebarWidth = sidebarOpen
     ? LAYOUT.SIDEBAR_WIDTH_OPEN
@@ -28,9 +33,11 @@ export function AppLayout() {
         className="flex min-h-screen flex-col transition-[margin] duration-300 ease-in-out"
         style={{ marginLeft: sidebarWidth }}
       >
-        {/* Topbar is sticky so it stays visible while the content scrolls. */}
+        {/* Topbar is sticky so it stays visible while the content scrolls; the
+            error banner rides with it so a non-fatal failure is always visible. */}
         <div className="sticky top-0 z-10">
           <Topbar />
+          {error ? <ErrorBanner message={error} onDismiss={clearError} /> : null}
         </div>
 
         <main

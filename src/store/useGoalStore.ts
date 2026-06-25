@@ -21,6 +21,7 @@ import type {
   Task,
   GoalTree,
   TaskLineage,
+  Dependency,
   ID,
 } from '@/core/types'
 import { computeEffortMomentum } from '@/engine/progress/computeEffortMomentum'
@@ -46,6 +47,7 @@ import {
   computeWeeklyReview,
   type WeeklyReviewData,
 } from '@/engine/review/computeWeeklyReview'
+import { computeStrengthenedFoundations } from '@/engine/review/computeStrengthenedFoundations'
 import {
   getAllGoals,
   createGoal,
@@ -76,6 +78,15 @@ import {
   getDependenciesByType,
 } from '@/database/repositories'
 
+// User-facing copy for the store's NON-FATAL failure states. Kept calm and
+// generic — the user gets a gentle nudge, never a stack trace. WHY defined here
+// and not in core/constants: these belong to the store's error plumbing, not the
+// shared UI vocabulary other components reach for.
+const REFRESH_ERROR_MESSAGE =
+  'Something went wrong updating the view. What you see may be out of date.'
+const LOAD_ERROR_MESSAGE =
+  'Something went wrong loading your data. Please try again.'
+
 // ── "New X" input shapes (creation forms) ───────────────────────────────────
 // The repository owns id + timestamps; the store action owns `order` where the
 // entity has one. So the form supplies neither id/timestamps nor order.
@@ -105,8 +116,18 @@ export interface CompletedGoalCount {
   goalTitle: string
   count: number
 }
+// The Weekly Review's dependency signal, resolved to a title for display: a
+// foundational subgoal the user advanced this week (see computeStrengthenedFoundations).
+// Per the "one question per screen" principle, the dependency graph appears in
+// the review as leverage GAINED ("why did this week's work matter?"), distinct
+// from the dashboard's to-do framing and the roadmap's connection map.
+export interface StrengthenedFoundationNote {
+  subgoalTitle: string
+  activeSupportCount: number
+}
 export type WeeklyReview = WeeklyReviewData & {
   completedByGoal: CompletedGoalCount[]
+  strengthenedFoundations: StrengthenedFoundationNote[]
 }
 
 // ── Goal Health view-model (Phase 3 pace + Phase 4 dependency signal) ─────────
@@ -146,6 +167,11 @@ export interface RoadmapView {
   // A support cycle made a complete ordering impossible; the UI shows a calm note.
   cyclic: boolean
 }
+
+// A goal paired with all its tasks — the shared shape gatherGoalsWithTasks
+// produces and the two cross-goal refreshers (progress/health and top-priority)
+// both consume. Named so loadDashboard can fetch it once and pass it to both.
+type GoalWithTasks = { goal: Goal; tasks: Task[] }
 
 interface GoalState {
   // --- goal list ---
@@ -245,6 +271,15 @@ interface GoalState {
   currentRoadmap: RoadmapView | null
   isLoadingRoadmap: boolean
   loadRoadmap: (goalId: ID) => Promise<void>
+
+  // --- cross-cutting error state ---
+  // A single, calm, NON-FATAL message set when a background load or post-write
+  // refresh fails (e.g. an IndexedDB read rejects). Null when all is well. The
+  // app shell shows a dismissible banner; clearError dismisses it. WRITES still
+  // throw to their caller (forms handle those inline) — this covers the read-back
+  // path the user did not directly trigger and could not otherwise see fail.
+  error: string | null
+  clearError: () => void
 }
 
 export const useGoalStore = create<GoalState>()((set, get) => {
@@ -340,9 +375,7 @@ export const useGoalStore = create<GoalState>()((set, get) => {
   // task orphaned by a non-cascading goal/subgoal delete is excluded — same as
   // before. (Weekly Review intentionally uses getAllTasks() for ALL rows; this
   // is a different, goal-scoped view and must stay so.)
-  const gatherGoalsWithTasks = async (): Promise<
-    { goal: Goal; tasks: Task[] }[]
-  > => {
+  const gatherGoalsWithTasks = async (): Promise<GoalWithTasks[]> => {
     const goals = await getAllGoals()
     return Promise.all(
       goals.map(async (goal) => ({
@@ -357,12 +390,18 @@ export const useGoalStore = create<GoalState>()((set, get) => {
   // per-goal task fetch + engine math is the only place goalProgress is built;
   // every goal-list mutation routes through here. Cheap at this scale (tiny
   // tables); revisit if the goal/task counts ever grow large.
-  const refreshGoalsAndProgress = async () => {
+  const refreshGoalsAndProgress = async (
+    // loadDashboard fetches these two shared inputs once and passes them in, so
+    // the gather + graph read don't run twice per dashboard load. Called with no
+    // args everywhere else, where it fetches its own.
+    prefetchedGoalsWithTasks?: GoalWithTasks[],
+    prefetchedSubgoalEdges?: Dependency[],
+  ) => {
     // Goals + their tasks (shared helper) and the subgoal dependency graph, in
     // parallel. The graph feeds the SEPARATE "lagging foundation" health signal.
     const [goalsWithTasks, subgoalEdges] = await Promise.all([
-      gatherGoalsWithTasks(),
-      getDependenciesByType('subgoal'),
+      prefetchedGoalsWithTasks ?? gatherGoalsWithTasks(),
+      prefetchedSubgoalEdges ?? getDependenciesByType('subgoal'),
     ])
     // This goal's subgoals — including task-less ones, which still matter as
     // foundations (a 0%-done foundation is exactly what can lag) — fetched per
@@ -433,10 +472,14 @@ export const useGoalStore = create<GoalState>()((set, get) => {
   // both nudges the ranking (dependencyBoost inside rankTasks) and is cached for
   // the Priority panel's "Supports N active subgoals" explanation. All three reads
   // run in parallel.
-  const refreshTopPriority = async () => {
+  const refreshTopPriority = async (
+    // Same shared-input optimisation as refreshGoalsAndProgress (see there).
+    prefetchedGoalsWithTasks?: GoalWithTasks[],
+    prefetchedSubgoalEdges?: Dependency[],
+  ) => {
     const [goalsWithTasks, subgoalEdges, completedSubgoals] = await Promise.all([
-      gatherGoalsWithTasks(),
-      getDependenciesByType('subgoal'),
+      prefetchedGoalsWithTasks ?? gatherGoalsWithTasks(),
+      prefetchedSubgoalEdges ?? getDependenciesByType('subgoal'),
       getSubgoalsByStatus('completed'),
     ])
     const allTasks = goalsWithTasks.flatMap((g) => g.tasks)
@@ -454,6 +497,23 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       ),
       subgoalSupportCounts,
     })
+  }
+
+  // Refresh BOTH cross-goal caches — the top-priority focus list and the
+  // goals-list progress/health — from a SINGLE shared fetch. The goals-with-tasks
+  // gather and the subgoal-graph read happen once here and feed both refreshers,
+  // rather than each fetching its own. Used wherever both must update together:
+  // the dashboard load and every task mutation (a completed/added/removed task
+  // changes priority AND each goal's progress/health, so they must move in step).
+  const refreshCrossGoal = async (): Promise<void> => {
+    const [goalsWithTasks, subgoalEdges] = await Promise.all([
+      gatherGoalsWithTasks(),
+      getDependenciesByType('subgoal'),
+    ])
+    await Promise.all([
+      refreshTopPriority(goalsWithTasks, subgoalEdges),
+      refreshGoalsAndProgress(goalsWithTasks, subgoalEdges),
+    ])
   }
 
   // Apply the milestone auto-completion rule after a task changes: a milestone
@@ -485,7 +545,30 @@ export const useGoalStore = create<GoalState>()((set, get) => {
   const nextOrder = (orders: number[]): number =>
     orders.length === 0 ? 0 : Math.max(...orders) + 1
 
+  // Run independent refreshers concurrently as BEST EFFORT. Three guarantees:
+  //  1. One failing refresh never aborts the others (allSettled, not all) — so a
+  //     single bad read can't leave MORE of the view stale than necessary.
+  //  2. It never throws — these run AFTER a successful write, so a failed re-read
+  //     must not make the mutation look like it failed (the write already landed).
+  //     Previously a rejected refresh surfaced as an unhandled promise rejection.
+  //  3. It resolves the error flag either way: any rejection raises the calm
+  //     refresh message; a fully-successful pass clears a stale error.
+  const settleRefreshes = async (
+    refreshes: Promise<unknown>[],
+  ): Promise<void> => {
+    const results = await Promise.allSettled(refreshes)
+    set({
+      error: results.some((r) => r.status === 'rejected')
+        ? REFRESH_ERROR_MESSAGE
+        : null,
+    })
+  }
+
   return {
+    // --- cross-cutting error state ---
+    error: null,
+    clearError: () => set({ error: null }),
+
     // --- goal list ---
     goals: [],
     goalProgress: {},
@@ -496,6 +579,9 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       set({ isLoadingGoals: true })
       try {
         await refreshGoalsAndProgress()
+        set({ error: null })
+      } catch {
+        set({ error: LOAD_ERROR_MESSAGE })
       } finally {
         set({ isLoadingGoals: false })
       }
@@ -503,15 +589,17 @@ export const useGoalStore = create<GoalState>()((set, get) => {
 
     addGoal: async (input) => {
       const goal = await createGoal(input)
-      await refreshGoalsAndProgress()
+      await settleRefreshes([refreshGoalsAndProgress()])
       return goal
     },
 
     editGoal: async (id, changes) => {
       await updateGoal(id, changes)
-      await refreshGoalsAndProgress()
-      // If this goal is the one open in the Detail View, refresh its tree too.
-      if (get().currentGoalTree?.goal.id === id) await refreshCurrentTree()
+      // Refresh the list and, if this goal is open in the Detail View, its tree
+      // too — concurrently and best-effort (the write already succeeded).
+      const refreshes = [refreshGoalsAndProgress()]
+      if (get().currentGoalTree?.goal.id === id) refreshes.push(refreshCurrentTree())
+      await settleRefreshes(refreshes)
     },
 
     // deleteGoal cascades its subtree (subgoals/milestones/tasks) AND removes any
@@ -519,7 +607,7 @@ export const useGoalStore = create<GoalState>()((set, get) => {
     // repository transaction. Nothing extra to do here.
     removeGoal: async (id) => {
       await deleteGoal(id)
-      await refreshGoalsAndProgress()
+      await settleRefreshes([refreshGoalsAndProgress()])
     },
 
     // --- dashboard (today + overdue + upcoming) ---
@@ -540,11 +628,11 @@ export const useGoalStore = create<GoalState>()((set, get) => {
     loadDashboard: async () => {
       set({ isLoadingDashboard: true })
       try {
-        await Promise.all([
-          refreshDashboard(),
-          refreshTopPriority(),
-          refreshGoalsAndProgress(),
-        ])
+        // Best-effort: the windows and the cross-goal caches are independent, so a
+        // single failing read should not blank the whole dashboard. refreshCrossGoal
+        // does the goals-list and priority refresh from one shared fetch.
+        // settleRefreshes owns the error flag and never throws (can't reject load).
+        await settleRefreshes([refreshDashboard(), refreshCrossGoal()])
       } finally {
         set({ isLoadingDashboard: false })
       }
@@ -576,7 +664,10 @@ export const useGoalStore = create<GoalState>()((set, get) => {
           currentGoalTree: tree,
           subgoalProgress: subgoalProgressFromTree(tree),
           currentGoalProgress: goalProgressFromTree(tree),
+          error: null,
         })
+      } catch {
+        set({ error: LOAD_ERROR_MESSAGE })
       } finally {
         set({ isLoadingTree: false })
       }
@@ -587,19 +678,23 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       const siblings = await getSubgoalsByGoalId(input.goalId)
       const order = nextOrder(siblings.map((s) => s.order))
       const subgoal = await createSubgoal({ ...input, order })
-      await refreshCurrentTree()
+      await settleRefreshes([refreshCurrentTree()])
       return subgoal
     },
     editSubgoal: async (id, changes) => {
       await updateSubgoal(id, changes)
-      await refreshCurrentTree()
+      await settleRefreshes([refreshCurrentTree()])
     },
     // deleteSubgoal cascades its milestones + tasks AND removes any dependency
     // edges referencing this subgoal or its deleted tasks, atomically in the
-    // repository transaction. Nothing extra to do here.
+    // repository transaction.
     removeSubgoal: async (id) => {
       await deleteSubgoal(id)
-      await refreshCurrentTree()
+      // Cascade-deleting a subgoal's tasks changes the parent goal's
+      // progress/health and the lagging-foundation signal, so refresh the cached
+      // goals list too — not just the open tree. (Previously the list stayed
+      // stale until the Goals page remounted.)
+      await settleRefreshes([refreshCurrentTree(), refreshGoalsAndProgress()])
     },
 
     // --- milestones ---
@@ -607,18 +702,18 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       const siblings = await getMilestonesBySubgoalId(input.subgoalId)
       const order = nextOrder(siblings.map((m) => m.order))
       const milestone = await createMilestone({ ...input, order })
-      await refreshCurrentTree()
+      await settleRefreshes([refreshCurrentTree()])
       return milestone
     },
     editMilestone: async (id, changes) => {
       await updateMilestone(id, changes)
-      await refreshCurrentTree()
+      await settleRefreshes([refreshCurrentTree()])
     },
     // deleteMilestone REHOMES its tasks (clears milestoneId -> loose under the
     // subgoal) and deletes only the milestone row; no task data is lost.
     removeMilestone: async (id) => {
       await deleteMilestone(id)
-      await refreshCurrentTree()
+      await settleRefreshes([refreshCurrentTree()])
     },
 
     // --- tasks ---
@@ -634,12 +729,14 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       // A new (pending) task under a completed milestone must re-open it.
       if (input.milestoneId) await reconcileMilestone(input.milestoneId)
       // Refresh every surface a task touches: the goal tree (Detail View), the
-      // dashboard windows, and the cross-goal priority list. One uniform
-      // invariant — each refresher no-ops cheaply for a view that isn't mounted.
-      await Promise.all([
+      // dashboard windows, and the cross-goal caches (priority list AND goals-list
+      // progress/health). Best-effort — each refresher no-ops cheaply for a view
+      // that isn't mounted, and one failing refresh must neither abort the others
+      // nor reject this (already-saved) add.
+      await settleRefreshes([
         refreshCurrentTree(),
         refreshDashboard(),
-        refreshTopPriority(),
+        refreshCrossGoal(),
       ])
       return task
     },
@@ -657,10 +754,10 @@ export const useGoalStore = create<GoalState>()((set, get) => {
         'milestoneId' in changes ? changes.milestoneId : before?.milestoneId
       if (newMilestoneId) affected.add(newMilestoneId)
       await Promise.all([...affected].map(reconcileMilestone))
-      await Promise.all([
+      await settleRefreshes([
         refreshCurrentTree(),
         refreshDashboard(),
-        refreshTopPriority(),
+        refreshCrossGoal(),
       ])
     },
     removeTask: async (id) => {
@@ -669,10 +766,10 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       const before = await getTaskById(id)
       await deleteTask(id)
       if (before?.milestoneId) await reconcileMilestone(before.milestoneId)
-      await Promise.all([
+      await settleRefreshes([
         refreshCurrentTree(),
         refreshDashboard(),
-        refreshTopPriority(),
+        refreshCrossGoal(),
       ])
     },
 
@@ -692,10 +789,10 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       // Loose tasks (no milestoneId) have no milestone to reconcile. Run before
       // the refreshes so the tree picks up the milestone's new status too.
       if (task.milestoneId) await reconcileMilestone(task.milestoneId)
-      await Promise.all([
+      await settleRefreshes([
         refreshCurrentTree(),
         refreshDashboard(),
-        refreshTopPriority(),
+        refreshCrossGoal(),
       ])
     },
 
@@ -710,7 +807,14 @@ export const useGoalStore = create<GoalState>()((set, get) => {
     loadWeeklyReview: async () => {
       set({ isLoadingReview: true })
       try {
-        const tasks = await getAllTasks()
+        // All tasks (for the live review) plus the subgoal graph and which
+        // subgoals are complete (for the "foundations strengthened" signal), in
+        // parallel — none depends on another.
+        const [tasks, subgoalEdges, completedSubgoals] = await Promise.all([
+          getAllTasks(),
+          getDependenciesByType('subgoal'),
+          getSubgoalsByStatus('completed'),
+        ])
         const review = computeWeeklyReview(tasks, new Date())
 
         // Group completed tasks by their parent goal, reusing getTaskLineages
@@ -727,7 +831,27 @@ export const useGoalStore = create<GoalState>()((set, get) => {
           .map(([goalTitle, count]) => ({ goalTitle, count }))
           .sort((a, b) => b.count - a.count || a.goalTitle.localeCompare(b.goalTitle))
 
-        set({ weeklyReview: { ...review, completedByGoal } })
+        // Dependency signal: foundational subgoals this week's completed work
+        // advanced. The engine returns ids in leverage order; resolve each to its
+        // title via the lineages already fetched (the ids are a subset of the
+        // completed tasks' subgoals, so they are present — fall back if dangling).
+        const completedSubgoalIds = new Set(completedSubgoals.map((s) => s.id))
+        const strengthenedFoundations: StrengthenedFoundationNote[] =
+          computeStrengthenedFoundations(
+            review.completedTasks,
+            subgoalEdges,
+            completedSubgoalIds,
+          ).map((f) => ({
+            subgoalTitle: lineages[f.subgoalId]?.subgoalTitle ?? 'a subgoal',
+            activeSupportCount: f.activeSupportCount,
+          }))
+
+        set({
+          weeklyReview: { ...review, completedByGoal, strengthenedFoundations },
+          error: null,
+        })
+      } catch {
+        set({ error: LOAD_ERROR_MESSAGE })
       } finally {
         set({ isLoadingReview: false })
       }
@@ -786,7 +910,12 @@ export const useGoalStore = create<GoalState>()((set, get) => {
           })
         }
 
-        set({ currentRoadmap: { goalId, stations, cyclic: layout.cyclic } })
+        set({
+          currentRoadmap: { goalId, stations, cyclic: layout.cyclic },
+          error: null,
+        })
+      } catch {
+        set({ error: LOAD_ERROR_MESSAGE })
       } finally {
         set({ isLoadingRoadmap: false })
       }
