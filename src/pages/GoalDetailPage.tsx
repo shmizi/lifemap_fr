@@ -9,7 +9,7 @@
 
 import { type ReactNode, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, Plus, Pencil } from 'lucide-react'
+import { ArrowLeft, Plus, Pencil, Sparkles } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { ROUTES, GOAL_CATEGORY_OPTIONS } from '@/core/constants'
 import { useGoalTree } from '@/core/hooks/useGoalTree'
@@ -18,6 +18,7 @@ import { useGoalStore } from '@/store/useGoalStore'
 import { ProgressRing } from '@/components/progress/ProgressRing'
 import { SubgoalSection } from '@/features/goals/SubgoalSection'
 import { SubgoalCreationModal } from '@/features/goals/SubgoalCreationModal'
+import { SuggestedSubgoalsModal } from '@/features/goals/SuggestedSubgoalsModal'
 import { GoalCreationModal } from '@/features/goals/GoalCreationModal'
 import type { Goal } from '@/core/types'
 
@@ -48,6 +49,7 @@ export function GoalDetailPage() {
   // header above the per-subgoal rings; hidden until the goal has tasks.
   const goalProgress = useGoalStore((s) => s.currentGoalProgress)
   const [isAddSubgoalOpen, setIsAddSubgoalOpen] = useState(false)
+  const [isSuggestSubgoalsOpen, setIsSuggestSubgoalsOpen] = useState(false)
   const [isEditGoalOpen, setIsEditGoalOpen] = useState(false)
 
   if (isLoading) {
@@ -132,14 +134,24 @@ export function GoalDetailPage() {
           <h2 className="text-sm font-semibold uppercase tracking-wide text-app-text-muted">
             Subgoals
           </h2>
-          <button
-            type="button"
-            onClick={() => setIsAddSubgoalOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-app-lg border border-app-border px-3 py-1.5 text-sm font-medium text-app-text transition hover:bg-app-border/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
-          >
-            <Plus size={15} />
-            Add subgoal
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsSuggestSubgoalsOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-app-lg border border-app-border px-3 py-1.5 text-sm font-medium text-app-text transition hover:bg-app-border/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+            >
+              <Sparkles size={15} />
+              Suggest subgoals
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsAddSubgoalOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-app-lg border border-app-border px-3 py-1.5 text-sm font-medium text-app-text transition hover:bg-app-border/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+            >
+              <Plus size={15} />
+              Add subgoal
+            </button>
+          </div>
         </div>
 
         {subgoals.length === 0 ? (
@@ -147,14 +159,24 @@ export function GoalDetailPage() {
             <p className="text-sm text-app-text-muted">
               No subgoals yet. Break this goal into the major parts it depends on.
             </p>
-            <button
-              type="button"
-              onClick={() => setIsAddSubgoalOpen(true)}
-              className="mt-4 inline-flex items-center gap-1.5 rounded-app-lg bg-app-text px-4 py-2 text-sm font-semibold text-app-surface transition hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
-            >
-              <Plus size={16} />
-              Add your first subgoal
-            </button>
+            <div className="mt-4 flex flex-wrap justify-center gap-3">
+              <button
+                type="button"
+                onClick={() => setIsAddSubgoalOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-app-lg bg-app-text px-4 py-2 text-sm font-semibold text-app-surface transition hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+              >
+                <Plus size={16} />
+                Add your first subgoal
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsSuggestSubgoalsOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-app-lg border border-app-border px-4 py-2 text-sm font-semibold text-app-text transition hover:bg-app-border/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+              >
+                <Sparkles size={16} />
+                Suggest subgoals
+              </button>
+            </div>
           </div>
         ) : (
           <div className="mt-3 space-y-3">
@@ -162,6 +184,7 @@ export function GoalDetailPage() {
               <SubgoalSection
                 key={subgoalTree.subgoal.id}
                 data={subgoalTree}
+                goalTitle={goal.title}
                 allSubgoals={allSubgoals}
                 subgoalDependencies={subgoalDependencies}
               />
@@ -174,6 +197,19 @@ export function GoalDetailPage() {
         goalId={goal.id}
         open={isAddSubgoalOpen}
         onClose={() => setIsAddSubgoalOpen(false)}
+      />
+
+      {/* AI-suggested subgoals for this goal (accept / edit / reject). */}
+      <SuggestedSubgoalsModal
+        goalId={goal.id}
+        open={isSuggestSubgoalsOpen}
+        onClose={() => setIsSuggestSubgoalsOpen(false)}
+        context={{
+          goalTitle: goal.title,
+          goalDescription: goal.description,
+          goalCategory: categoryLabel(goal.category),
+          existingSubgoalTitles: subgoals.map((st) => st.subgoal.title),
+        }}
       />
 
       {/* Edit THIS goal. */}

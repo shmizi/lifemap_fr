@@ -50,11 +50,24 @@ import {
 import { computeStrengthenedFoundations } from '@/engine/review/computeStrengthenedFoundations'
 import { buildMilestonePrompt } from '@/engine/ai/prompts/milestones'
 import { parseMilestoneSuggestions } from '@/engine/ai/parsers/milestones'
+import { buildSubgoalPrompt } from '@/engine/ai/prompts/subgoals'
+import { parseSubgoalSuggestions } from '@/engine/ai/parsers/subgoals'
+import { buildDailyPlanPrompt } from '@/engine/ai/prompts/dailyPlan'
+import { parseSuggestionList } from '@/engine/ai/parsers/suggestionList'
+import {
+  scheduleDailyTasks,
+  computePlanWindow,
+} from '@/engine/ai/scheduleDailyTasks'
 import type {
   MilestoneSuggestion,
   MilestoneSuggestionContext,
+  SubgoalSuggestion,
+  SubgoalSuggestionContext,
+  DailyPlanRequest,
+  ScheduledDailyTask,
 } from '@/engine/ai/types'
 import { aiProvider } from '@/services/ai'
+import { DAILY_PLAN_HORIZON } from '@/core/constants'
 import {
   getAllGoals,
   createGoal,
@@ -293,6 +306,20 @@ interface GoalState {
   suggestMilestones: (
     context: MilestoneSuggestionContext,
   ) => Promise<MilestoneSuggestion[]>
+  // The sibling for goals: suggest the major subgoals a goal breaks into. Same
+  // read-only contract — returns suggestions for the UI to accept/edit/reject;
+  // accepted ones go through the existing addSubgoal path. Same provider seam.
+  suggestSubgoals: (
+    context: SubgoalSuggestionContext,
+  ) => Promise<SubgoalSuggestion[]>
+  // For a consistency subgoal: generate a short, dated daily practice plan. The
+  // model supplies the ordered sessions (what); the pure scheduler dates them
+  // (when). READ-ONLY — returns the scheduled tasks for the UI to preview/accept;
+  // accepted ones go through the existing addTask path with scheduledDate +
+  // estimatedMinutes. Same provider seam, same propagate-on-failure contract.
+  generateDailyPlan: (
+    request: DailyPlanRequest,
+  ) => Promise<ScheduledDailyTask[]>
 
   // --- cross-cutting error state ---
   // A single, calm, NON-FATAL message set when a background load or post-write
@@ -951,6 +978,52 @@ export const useGoalStore = create<GoalState>()((set, get) => {
     suggestMilestones: async (context) => {
       const response = await aiProvider.complete(buildMilestonePrompt(context))
       return parseMilestoneSuggestions(response)
+    },
+
+    // Sibling of suggestMilestones, one level up: goal -> its subgoals. Same
+    // thin orchestration (pure prompt -> provider -> pure parser), same
+    // propagate-on-failure contract.
+    suggestSubgoals: async (context) => {
+      const response = await aiProvider.complete(buildSubgoalPrompt(context))
+      return parseSubgoalSuggestions(response)
+    },
+
+    // Daily plan: resolve the window from the subgoal's EXISTING scheduled tasks
+    // (so a re-run extends, not overlaps) -> prompt -> provider -> shared parser
+    // (capped at the window length) -> pure scheduler that dates the sessions
+    // from the window start. `new Date()` is read here (store side), never in the
+    // engine. Returns [] when the plan already reaches the deadline. Read-only;
+    // the modal writes accepted tasks via addTask.
+    generateDailyPlan: async (request) => {
+      const existing = await getTasksBySubgoalId(request.subgoalId)
+      const scheduledDates = existing
+        .map((t) => t.scheduledDate)
+        .filter((d): d is string => d !== undefined)
+      // 'yyyy-MM-dd' keys sort lexically, so the max string is the latest day.
+      const lastScheduledDate =
+        scheduledDates.length > 0
+          ? scheduledDates.reduce((a, b) => (a > b ? a : b))
+          : null
+
+      const { startDate, days } = computePlanWindow(
+        new Date(),
+        lastScheduledDate,
+        request.targetDate ?? null,
+        DAILY_PLAN_HORIZON,
+      )
+      if (days <= 0) return [] // already planned through the deadline
+
+      const response = await aiProvider.complete(
+        buildDailyPlanPrompt({
+          subgoalTitle: request.subgoalTitle,
+          subgoalDescription: request.subgoalDescription,
+          goalTitle: request.goalTitle,
+          dailyMinutes: request.dailyMinutes,
+          days,
+        }),
+      )
+      const sessions = parseSuggestionList(response, days)
+      return scheduleDailyTasks(sessions, startDate, request.dailyMinutes)
     },
   }
 })
