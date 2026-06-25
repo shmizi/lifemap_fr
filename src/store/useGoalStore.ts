@@ -37,6 +37,7 @@ import {
   computeGoalHealth,
   type GoalHealth,
 } from '@/engine/health/computeGoalHealth'
+import { computeLaggingFoundation } from '@/engine/health/computeLaggingFoundation'
 import { isMilestoneComplete } from '@/engine/progress/isMilestoneComplete'
 import { rankTasks, DEFAULT_TOP_N } from '@/engine/priority/rankTasks'
 import { computeActiveSupportCounts } from '@/engine/priority/dependencyBoost'
@@ -108,6 +109,21 @@ export type WeeklyReview = WeeklyReviewData & {
   completedByGoal: CompletedGoalCount[]
 }
 
+// ── Goal Health view-model (Phase 3 pace + Phase 4 dependency signal) ─────────
+// A goal's health for the UI: the PACE signal (computeGoalHealth) PLUS the
+// SEPARATE dependency signal (computeLaggingFoundation), resolved to subgoal
+// titles. The two are kept as distinct fields and never blended — the card shows
+// the pace badge and, independently, a one-line "foundation lagging" note. Adding
+// the second signal as its own field (not a new status) is what keeps the pace
+// score a single, explainable contributor.
+export interface LaggingFoundationNote {
+  foundationTitle: string
+  dependentTitle: string
+}
+export type GoalHealthView = GoalHealth & {
+  laggingFoundation: LaggingFoundationNote | null
+}
+
 // ── Roadmap view-model (Phase 4) ─────────────────────────────────────────────
 // The dependency-ordered "stations" for ONE goal: each subgoal joined to its
 // resolved supporters / supported subgoals (so the UI has titles, not bare ids)
@@ -138,11 +154,13 @@ interface GoalState {
   // (never inline). Feeds the calm progress ring on each GoalCard. Refreshed
   // whenever the goal list is (re)loaded or a goal is added/edited/removed.
   goalProgress: Record<ID, GoalProgress>
-  // Per-goal health (pace vs. deadline), keyed by goalId, computed by the engine
-  // in the SAME pass as goalProgress so a card's progress and health never
-  // disagree. A single, explainable signal — not a blended score. GoalCard reads
-  // its own entry; 'no_tasks' goals render no badge.
-  goalHealth: Record<ID, GoalHealth>
+  // Per-goal health, keyed by goalId, computed by the engine in the SAME pass as
+  // goalProgress so a card's progress and health never disagree. Two SEPARATE,
+  // each-explainable signals (never blended): pace vs. deadline (status/score)
+  // and the dependency "lagging foundation" note. GoalCard reads its own entry;
+  // 'no_tasks' goals render no pace badge, and laggingFoundation is null unless
+  // a foundation is trailing the work that leans on it.
+  goalHealth: Record<ID, GoalHealthView>
   isLoadingGoals: boolean
   loadGoals: () => Promise<void>
   addGoal: (input: NewGoalInput) => Promise<Goal>
@@ -340,22 +358,58 @@ export const useGoalStore = create<GoalState>()((set, get) => {
   // every goal-list mutation routes through here. Cheap at this scale (tiny
   // tables); revisit if the goal/task counts ever grow large.
   const refreshGoalsAndProgress = async () => {
-    const goalsWithTasks = await gatherGoalsWithTasks()
+    // Goals + their tasks (shared helper) and the subgoal dependency graph, in
+    // parallel. The graph feeds the SEPARATE "lagging foundation" health signal.
+    const [goalsWithTasks, subgoalEdges] = await Promise.all([
+      gatherGoalsWithTasks(),
+      getDependenciesByType('subgoal'),
+    ])
+    // This goal's subgoals — including task-less ones, which still matter as
+    // foundations (a 0%-done foundation is exactly what can lag) — fetched per
+    // goal in parallel. Used to compute per-subgoal completion and to resolve the
+    // lagging-foundation note's titles. Cheap at this scale; same per-goal fan-out
+    // pattern as gatherGoalsWithTasks.
+    const subgoalsPerGoal = await Promise.all(
+      goalsWithTasks.map((g) => getSubgoalsByGoalId(g.goal.id)),
+    )
+
     // One `now` for the whole list so every goal's health is judged against the
     // same moment. Completion is computed once per goal and reused for health.
     const now = new Date()
-    const entries = goalsWithTasks.map((g) => {
+    const entries = goalsWithTasks.map((g, i) => {
       const progress = computeGoalProgress(g.tasks)
-      return {
-        goal: g.goal,
+      const pace = computeGoalHealth(
+        g.goal.createdAt,
+        g.goal.targetDate,
         progress,
-        health: computeGoalHealth(
-          g.goal.createdAt,
-          g.goal.targetDate,
-          progress,
-          now,
-        ),
+        now,
+      )
+
+      // Per-subgoal completion% for this goal (task-less subgoals -> 0%), keyed by
+      // subgoalId. Tasks are already in hand from gatherGoalsWithTasks, so this is
+      // pure in-memory grouping — no extra DB read. The pure engine then decides
+      // whether any foundation is trailing the work that depends on it.
+      const subgoals = subgoalsPerGoal[i]
+      const completionBySubgoalId = new Map<ID, number>()
+      for (const s of subgoals) {
+        const subgoalTasks = g.tasks.filter((t) => t.subgoalId === s.id)
+        completionBySubgoalId.set(
+          s.id,
+          computeSubgoalProgress(subgoalTasks).percent,
+        )
       }
+      const lagging = computeLaggingFoundation(subgoalEdges, completionBySubgoalId)
+      const titleOf = (id: ID): string =>
+        subgoals.find((s) => s.id === id)?.title ?? 'a subgoal'
+      const laggingFoundation: LaggingFoundationNote | null = lagging
+        ? {
+            foundationTitle: titleOf(lagging.foundationId),
+            dependentTitle: titleOf(lagging.dependentId),
+          }
+        : null
+
+      const health: GoalHealthView = { ...pace, laggingFoundation }
+      return { goal: g.goal, progress, health }
     })
     set({
       goals: entries.map((e) => e.goal),
@@ -363,7 +417,7 @@ export const useGoalStore = create<GoalState>()((set, get) => {
         entries.map((e): [ID, GoalProgress] => [e.goal.id, e.progress]),
       ),
       goalHealth: Object.fromEntries(
-        entries.map((e): [ID, GoalHealth] => [e.goal.id, e.health]),
+        entries.map((e): [ID, GoalHealthView] => [e.goal.id, e.health]),
       ),
     })
   }
