@@ -51,6 +51,7 @@ export function WeeklyReviewPage() {
           <>
             <MomentumTrend review={weeklyReview} />
             <CompletedSummary review={weeklyReview} />
+            <StrengthenedSummary review={weeklyReview} />
             <OpenSummary review={weeklyReview} />
           </>
         )}
@@ -127,6 +128,43 @@ function CompletedSummary({ review }: { review: WeeklyReview }) {
           ))}
         </ul>
       ) : null}
+    </Card>
+  )
+}
+
+// The dependency lens for this screen's question — "why did this week's work
+// matter?" — surfaced as leverage gained: foundational subgoals the week's
+// completions advanced. Rendered only when there is something to celebrate, so it
+// never adds a hollow card to a light week.
+function StrengthenedSummary({ review }: { review: WeeklyReview }) {
+  const foundations = review.strengthenedFoundations
+  if (foundations.length === 0) return null
+
+  return (
+    <Card>
+      <h2 className="text-lg font-semibold text-app-text">
+        Foundations you strengthened
+      </h2>
+      {/* One sentence: progress here lifts everything resting on it. */}
+      <p className="mt-1 text-sm text-app-text-muted">
+        Work you finished this week strengthened {foundations.length}{' '}
+        {plural(foundations.length, 'subgoal')} that other subgoals build on.
+      </p>
+
+      <ul className="mt-4 space-y-2">
+        {foundations.map((f) => (
+          <li
+            key={f.subgoalTitle}
+            className="flex items-center justify-between gap-3 text-sm"
+          >
+            <span className="truncate text-app-text">{f.subgoalTitle}</span>
+            <span className="shrink-0 text-app-text-muted">
+              lifts {f.activeSupportCount} active{' '}
+              {plural(f.activeSupportCount, 'subgoal')}
+            </span>
+          </li>
+        ))}
+      </ul>
     </Card>
   )
 }
