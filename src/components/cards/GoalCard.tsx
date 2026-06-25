@@ -20,6 +20,7 @@ import type { Goal } from '@/core/types'
 import { goalDetailPath, GOAL_CATEGORY_OPTIONS } from '@/core/constants'
 import { useGoalStore } from '@/store/useGoalStore'
 import { ProgressRing } from '@/components/progress/ProgressRing'
+import { GoalHealthBadge } from '@/components/cards/GoalHealthBadge'
 
 interface GoalCardProps {
   goal: Goal
@@ -39,6 +40,9 @@ export function GoalCard({ goal }: GoalCardProps) {
   const progress = useGoalStore((s) => s.goalProgress[goal.id])
   // A goal with no tasks has no momentum to show — keep the card calm, no ring.
   const showRing = progress !== undefined && progress.total > 0
+  // Engine-computed pace health (same load pass as progress). Hidden for a goal
+  // with no tasks ('no_tasks') — nothing to be on/off track about yet.
+  const health = useGoalStore((s) => s.goalHealth[goal.id])
 
   // Two-step delete: idle -> confirming -> (delete | cancel). The confirm step
   // matters because deletion is destructive and there is no undo.
@@ -66,9 +70,20 @@ export function GoalCard({ goal }: GoalCardProps) {
       >
         <div className="flex items-start justify-between gap-3">
           <h3 className="text-base font-semibold text-app-text">{goal.title}</h3>
-          <span className="shrink-0 rounded-full border border-app-border px-2.5 py-0.5 text-xs text-app-text-muted">
-            {categoryLabel(goal.category)}
-          </span>
+          <div className="flex shrink-0 items-center gap-2">
+            {/* Pace health is meaningless for a finished goal — a completed or
+                archived goal is done, not "on track" — so the badge is hidden
+                for those (and for goals with no tasks to assess). */}
+            {health &&
+            health.status !== 'no_tasks' &&
+            goal.status !== 'completed' &&
+            goal.status !== 'archived' ? (
+              <GoalHealthBadge status={health.status} />
+            ) : null}
+            <span className="rounded-full border border-app-border px-2.5 py-0.5 text-xs text-app-text-muted">
+              {categoryLabel(goal.category)}
+            </span>
+          </div>
         </div>
 
         {goal.description ? (

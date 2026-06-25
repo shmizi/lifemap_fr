@@ -11,7 +11,8 @@
  * topological ordering, NO validation that fromId/toId actually match the
  * declared `type`, and NO "what happens to an edge when one side is deleted"
  * logic. Those are rules; rules live in engine/dependencies/ (later), never in
- * a repository. A Dependency edge means "fromId must complete before toId".
+ * a repository. A Dependency edge means "fromId supports/strengthens toId" — a
+ * SOFT link, not a hard prerequisite (nothing blocks on it).
  *
  * Mirrors the Milestone repository's identity convention: Dependency has NO
  * `updatedAt`, so we stamp `createdAt` on create and never maintain an updated
@@ -45,9 +46,11 @@ export async function createDependency(
 }
 
 /**
- * Edges that BLOCK `entityId`: dependencies whose `toId` is this entity, i.e.
- * "what must complete before this entity can proceed." `toId` is indexed
- * (stores.ts: 'id, fromId, toId, type'), so this queries via the index.
+ * Edges where `entityId` is the dependent: dependencies whose `toId` is this
+ * entity, i.e. "what supports/strengthens this entity" (its soft prerequisites).
+ * The "Blocking" name is historical — under the soft model these support rather
+ * than block. `toId` is indexed (stores.ts: 'id, fromId, toId, type'), so this
+ * queries via the index.
  *
  * Cross-cutting getter — returns index order, unsorted (consistent with the
  * other byStatus/byScheduledDate getters; Dependency has no `order` field).
@@ -59,9 +62,9 @@ export async function getDependenciesBlocking(
 }
 
 /**
- * Edges DOWNSTREAM of `entityId`: dependencies whose `fromId` is this entity,
- * i.e. "what this entity blocks." `fromId` is indexed, so this queries via the
- * index. Returns index order, unsorted (same rationale as above).
+ * Edges where `entityId` is the supporter: dependencies whose `fromId` is this
+ * entity, i.e. "what this entity supports/strengthens." `fromId` is indexed, so
+ * this queries via the index. Returns index order, unsorted (same rationale).
  */
 export async function getDependenciesDownstreamOf(
   entityId: ID

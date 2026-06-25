@@ -22,6 +22,7 @@ export function DashboardPage() {
   const taskLineages = useGoalStore((s) => s.taskLineages)
   const todayEffort = useGoalStore((s) => s.todayEffort)
   const topPriorityTasks = useGoalStore((s) => s.topPriorityTasks)
+  const subgoalSupportCounts = useGoalStore((s) => s.subgoalSupportCounts)
   const goals = useGoalStore((s) => s.goals)
   const goalProgress = useGoalStore((s) => s.goalProgress)
   const isLoadingDashboard = useGoalStore((s) => s.isLoadingDashboard)
@@ -49,7 +50,10 @@ export function DashboardPage() {
         {/* A focus suggestion drawn from ALL goals (not just today's schedule),
             placed right under the momentum bar. Hidden when there is nothing to
             focus on. */}
-        <PriorityTaskPanel tasks={topPriorityTasks} />
+        <PriorityTaskPanel
+          tasks={topPriorityTasks}
+          supportCounts={subgoalSupportCounts}
+        />
 
         {/* Overdue is hidden when empty — being caught up should feel clean,
             not like an empty to-do box. */}

@@ -74,4 +74,27 @@ describe('rankTasks', () => {
     expect(rankTasks([done], NOW)).toEqual([])
     expect(rankTasks([], NOW)).toEqual([])
   })
+
+  it('breaks a tie in favour of a task whose subgoal supports active subgoals', () => {
+    // Two otherwise-identical tasks (same priority, same createdAt). Only their
+    // subgoals differ; sg-A supports 1 active subgoal, sg-B supports none.
+    const supported = makeTask({ id: 'supported', subgoalId: 'sg-A' })
+    const plain = makeTask({ id: 'plain', subgoalId: 'sg-B' })
+
+    // `plain` is first in input; the boost must still lift `supported` above it.
+    const ranked = rankTasks([plain, supported], NOW, 2, { 'sg-A': 1 })
+
+    expect(ranked.map((t) => t.id)).toEqual(['supported', 'plain'])
+  })
+
+  it('the boost cannot lift a low-priority supporter over a high-priority task', () => {
+    // Even maxed-out support (+6) must not overtake a full priority step (high=25
+    // vs low=0). Urgency/priority stay dominant; the dependency signal is a nudge.
+    const highPlain = makeTask({ id: 'high', priority: 'high', subgoalId: 'sg-B' })
+    const lowSupporter = makeTask({ id: 'low', priority: 'low', subgoalId: 'sg-A' })
+
+    const ranked = rankTasks([lowSupporter, highPlain], NOW, 2, { 'sg-A': 99 })
+
+    expect(ranked.map((t) => t.id)).toEqual(['high', 'low'])
+  })
 })

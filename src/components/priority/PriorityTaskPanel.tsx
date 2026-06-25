@@ -12,14 +12,21 @@
 // TaskRow lives in features/goals/; imported directly here, the same way
 // DashboardTaskSection consumes it.
 
-import type { Task } from '@/core/types'
+import type { ID, Task } from '@/core/types'
 import { TaskRow } from '@/features/goals/TaskRow'
 
 interface PriorityTaskPanelProps {
   tasks: Task[]
+  // Active-support count per subgoalId. When a shown task's subgoal supports
+  // active subgoals, we explain WHY it surfaced ("Supports N active subgoals").
+  // Optional so the panel still renders without the signal.
+  supportCounts?: Record<ID, number>
 }
 
-export function PriorityTaskPanel({ tasks }: PriorityTaskPanelProps) {
+export function PriorityTaskPanel({
+  tasks,
+  supportCounts = {},
+}: PriorityTaskPanelProps) {
   if (tasks.length === 0) return null
 
   return (
@@ -31,9 +38,20 @@ export function PriorityTaskPanel({ tasks }: PriorityTaskPanelProps) {
       </p>
 
       <div className="mt-4 space-y-1">
-        {tasks.map((task) => (
-          <TaskRow key={task.id} task={task} />
-        ))}
+        {tasks.map((task) => {
+          const activeSupport = supportCounts[task.subgoalId] ?? 0
+          return (
+            <div key={task.id}>
+              <TaskRow task={task} />
+              {activeSupport > 0 ? (
+                <p className="mt-0.5 pl-2 text-xs text-app-text-muted">
+                  Supports {activeSupport} active subgoal
+                  {activeSupport === 1 ? '' : 's'}
+                </p>
+              ) : null}
+            </div>
+          )
+        })}
       </div>
     </section>
   )

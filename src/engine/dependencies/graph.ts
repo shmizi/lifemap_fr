@@ -1,11 +1,11 @@
 // Shared graph primitives for the dependency engine (Phase 3).
 //
 // PURE TypeScript: no React, no DB, no store. A Dependency edge means "fromId
-// must complete before toId", so the directed edge runs fromId -> toId. Both
-// cycle detection and topological sorting need the same two views of an edge
-// list — the set of participating nodes, and a fromId -> [toId] adjacency map —
-// so they are built here once rather than re-derived in each module. This is a
-// concrete shared helper for two existing callers, not a speculative abstraction.
+// supports/strengthens toId" (a soft link), so the directed edge runs
+// fromId -> toId. Both cycle detection and topological sorting need the same two
+// views of an edge list — the set of participating nodes, and a fromId -> [toId]
+// adjacency map — so they are built here once rather than re-derived in each
+// module. A concrete shared helper for two existing callers, not a speculative one.
 //
 // SCOPE: these treat the edge list opaquely. They do NOT filter by Dependency
 // `type` ('subgoal' | 'task'); mixing those two id namespaces into one graph is

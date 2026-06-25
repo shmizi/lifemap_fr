@@ -1,9 +1,10 @@
 // detectCycle — find dependency loops before they break the graph (Phase 3).
 //
 // PURE TypeScript: no React, no DB, no store. A Dependency edge fromId -> toId
-// means "fromId must complete before toId". A cycle (A before B before A) is an
-// impossible constraint: nothing in the loop could ever start. These functions
-// answer three related questions over an edge list:
+// means "fromId supports/strengthens toId" (a SOFT link, not a hard prerequisite).
+// Even so, a cycle (A supports B supports A) has no consistent ordering and makes
+// the support graph self-referential, so we still detect and reject it. These
+// functions answer three related questions over an edge list:
 //   - findCycle: IS there a loop, and if so which nodes form it?
 //   - hasCycle:  IS there a loop? (boolean shorthand)
 //   - wouldCreateCycle: would adding ONE new edge introduce a loop? (the guard

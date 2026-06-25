@@ -33,8 +33,13 @@ import {
   computeSubgoalProgress,
   type SubgoalProgress,
 } from '@/engine/progress/computeSubgoalProgress'
+import {
+  computeGoalHealth,
+  type GoalHealth,
+} from '@/engine/health/computeGoalHealth'
 import { isMilestoneComplete } from '@/engine/progress/isMilestoneComplete'
-import { rankTasks } from '@/engine/priority/rankTasks'
+import { rankTasks, DEFAULT_TOP_N } from '@/engine/priority/rankTasks'
+import { computeActiveSupportCounts } from '@/engine/priority/dependencyBoost'
 import {
   computeWeeklyReview,
   type WeeklyReviewData,
@@ -49,6 +54,7 @@ import {
   createSubgoal,
   updateSubgoal,
   deleteSubgoal,
+  getSubgoalsByStatus,
   getMilestonesBySubgoalId,
   getMilestoneById,
   createMilestone,
@@ -65,6 +71,7 @@ import {
   getTaskLineages,
   getTasksByGoalId,
   getAllTasks,
+  getDependenciesByType,
 } from '@/database/repositories'
 
 // ── "New X" input shapes (creation forms) ───────────────────────────────────
@@ -107,6 +114,11 @@ interface GoalState {
   // (never inline). Feeds the calm progress ring on each GoalCard. Refreshed
   // whenever the goal list is (re)loaded or a goal is added/edited/removed.
   goalProgress: Record<ID, GoalProgress>
+  // Per-goal health (pace vs. deadline), keyed by goalId, computed by the engine
+  // in the SAME pass as goalProgress so a card's progress and health never
+  // disagree. A single, explainable signal — not a blended score. GoalCard reads
+  // its own entry; 'no_tasks' goals render no badge.
+  goalHealth: Record<ID, GoalHealth>
   isLoadingGoals: boolean
   loadGoals: () => Promise<void>
   addGoal: (input: NewGoalInput) => Promise<Goal>
@@ -136,6 +148,13 @@ interface GoalState {
   // This is a different lens from todaysTasks (which is "what I planned today").
   // Refreshed on dashboard load and after any task mutation.
   topPriorityTasks: Task[]
+  // Active-support count per subgoalId (how many not-yet-complete subgoals it
+  // supports), computed from the soft dependency graph. Feeds two things in one
+  // pass: the dependencyBoost applied inside the priority ranking above, AND the
+  // "Supports N active subgoals" explanation the Priority panel shows for a
+  // boosted task. Keyed by subgoalId because the count is a property of the
+  // subgoal, shared by all its tasks.
+  subgoalSupportCounts: Record<ID, number>
   isLoadingDashboard: boolean
   loadDashboard: () => Promise<void>
 
@@ -290,13 +309,29 @@ export const useGoalStore = create<GoalState>()((set, get) => {
   // tables); revisit if the goal/task counts ever grow large.
   const refreshGoalsAndProgress = async () => {
     const goalsWithTasks = await gatherGoalsWithTasks()
+    // One `now` for the whole list so every goal's health is judged against the
+    // same moment. Completion is computed once per goal and reused for health.
+    const now = new Date()
+    const entries = goalsWithTasks.map((g) => {
+      const progress = computeGoalProgress(g.tasks)
+      return {
+        goal: g.goal,
+        progress,
+        health: computeGoalHealth(
+          g.goal.createdAt,
+          g.goal.targetDate,
+          progress,
+          now,
+        ),
+      }
+    })
     set({
-      goals: goalsWithTasks.map((g) => g.goal),
+      goals: entries.map((e) => e.goal),
       goalProgress: Object.fromEntries(
-        goalsWithTasks.map((g): [ID, GoalProgress] => [
-          g.goal.id,
-          computeGoalProgress(g.tasks),
-        ]),
+        entries.map((e): [ID, GoalProgress] => [e.goal.id, e.progress]),
+      ),
+      goalHealth: Object.fromEntries(
+        entries.map((e): [ID, GoalHealth] => [e.goal.id, e.health]),
       ),
     })
   }
@@ -306,10 +341,33 @@ export const useGoalStore = create<GoalState>()((set, get) => {
   // repository query). rankTasks does the scoring/sorting/top-N; the store never
   // ranks inline. `new Date()` is read once here so the whole list is scored
   // against a single consistent "now".
+  //
+  // The soft dependency signal feeds in here too: the subgoal graph plus the set
+  // of completed subgoals yield an active-support count per subgoal (engine), which
+  // both nudges the ranking (dependencyBoost inside rankTasks) and is cached for
+  // the Priority panel's "Supports N active subgoals" explanation. All three reads
+  // run in parallel.
   const refreshTopPriority = async () => {
-    const goalsWithTasks = await gatherGoalsWithTasks()
+    const [goalsWithTasks, subgoalEdges, completedSubgoals] = await Promise.all([
+      gatherGoalsWithTasks(),
+      getDependenciesByType('subgoal'),
+      getSubgoalsByStatus('completed'),
+    ])
     const allTasks = goalsWithTasks.flatMap((g) => g.tasks)
-    set({ topPriorityTasks: rankTasks(allTasks, new Date()) })
+    const completedSubgoalIds = new Set(completedSubgoals.map((s) => s.id))
+    const subgoalSupportCounts = computeActiveSupportCounts(
+      subgoalEdges,
+      completedSubgoalIds,
+    )
+    set({
+      topPriorityTasks: rankTasks(
+        allTasks,
+        new Date(),
+        DEFAULT_TOP_N,
+        subgoalSupportCounts,
+      ),
+      subgoalSupportCounts,
+    })
   }
 
   // Apply the milestone auto-completion rule after a task changes: a milestone
@@ -345,6 +403,7 @@ export const useGoalStore = create<GoalState>()((set, get) => {
     // --- goal list ---
     goals: [],
     goalProgress: {},
+    goalHealth: {},
     isLoadingGoals: false,
 
     loadGoals: async () => {
@@ -384,6 +443,7 @@ export const useGoalStore = create<GoalState>()((set, get) => {
     taskLineages: {},
     todayEffort: { completed: 0, total: 0, percent: 0 },
     topPriorityTasks: [],
+    subgoalSupportCounts: {},
     isLoadingDashboard: false,
 
     // Initial load of the dashboard (flips the loading flag for the first paint).
