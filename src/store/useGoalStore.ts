@@ -40,6 +40,7 @@ import {
 import { isMilestoneComplete } from '@/engine/progress/isMilestoneComplete'
 import { rankTasks, DEFAULT_TOP_N } from '@/engine/priority/rankTasks'
 import { computeActiveSupportCounts } from '@/engine/priority/dependencyBoost'
+import { buildRoadmap } from '@/engine/roadmap/buildRoadmap'
 import {
   computeWeeklyReview,
   type WeeklyReviewData,
@@ -105,6 +106,29 @@ export interface CompletedGoalCount {
 }
 export type WeeklyReview = WeeklyReviewData & {
   completedByGoal: CompletedGoalCount[]
+}
+
+// ── Roadmap view-model (Phase 4) ─────────────────────────────────────────────
+// The dependency-ordered "stations" for ONE goal: each subgoal joined to its
+// resolved supporters / supported subgoals (so the UI has titles, not bare ids)
+// and its active-support count. The pure engine (buildRoadmap) produces the
+// ordering and graph facts over ids; the store joins those ids back to Subgoal
+// objects here, keeping the roadmap UI dumb — exactly how WeeklyReview's
+// completed-by-goal grouping is assembled on top of its engine result.
+export interface RoadmapStation {
+  subgoal: Subgoal
+  // How many still-active subgoals this one supports ("Supports N active subgoals").
+  activeSupportCount: number
+  // The subgoals that strengthen this one (resolved from the engine's ids).
+  supportedBy: Subgoal[]
+  // The subgoals this one strengthens (resolved from the engine's ids).
+  supports: Subgoal[]
+}
+export interface RoadmapView {
+  goalId: ID
+  stations: RoadmapStation[]
+  // A support cycle made a complete ordering impossible; the UI shows a calm note.
+  cyclic: boolean
 }
 
 interface GoalState {
@@ -195,6 +219,14 @@ interface GoalState {
   weeklyReview: WeeklyReview | null
   isLoadingReview: boolean
   loadWeeklyReview: () => Promise<void>
+
+  // --- roadmap (read-only; one goal at a time; consumed via useRoadmap) ---
+  // The dependency-ordered subgoals for the goal the Roadmap page is showing.
+  // Read-only by design: creating/removing edges stays on the Goal Detail panel
+  // (roadmap = comprehension, detail = editing). Single-slot like currentGoalTree.
+  currentRoadmap: RoadmapView | null
+  isLoadingRoadmap: boolean
+  loadRoadmap: (goalId: ID) => Promise<void>
 }
 
 export const useGoalStore = create<GoalState>()((set, get) => {
@@ -644,6 +676,65 @@ export const useGoalStore = create<GoalState>()((set, get) => {
         set({ weeklyReview: { ...review, completedByGoal } })
       } finally {
         set({ isLoadingReview: false })
+      }
+    },
+
+    // --- roadmap ---
+    currentRoadmap: null,
+    isLoadingRoadmap: false,
+
+    // Assemble the dependency-ordered roadmap for ONE goal. Read-only: it never
+    // mutates the graph (editing lives on the Goal Detail page). Fetches this
+    // goal's subgoals, the subgoal dependency graph, and which subgoals are
+    // complete — the SAME three inputs refreshTopPriority already uses — then the
+    // pure engine orders them and the store joins the resulting ids back to
+    // Subgoal objects for the UI. Mirrors loadGoalTree: it flips the loading flag
+    // for the first paint, and stamps the result with goalId so the page can tell
+    // a freshly-loaded roadmap from a previous goal's still on screen.
+    loadRoadmap: async (goalId) => {
+      set({ isLoadingRoadmap: true })
+      try {
+        const [subgoals, subgoalEdges, completedSubgoals] = await Promise.all([
+          getSubgoalsByGoalId(goalId),
+          getDependenciesByType('subgoal'),
+          getSubgoalsByStatus('completed'),
+        ])
+        const completedIds = new Set(completedSubgoals.map((s) => s.id))
+        const layout = buildRoadmap(
+          subgoals.map((s) => s.id),
+          subgoalEdges,
+          completedIds,
+        )
+
+        // Resolve the engine's ids back to this goal's Subgoal objects. Ids in
+        // the layout always come from `subgoals`, so every lookup hits — the
+        // filter is just to satisfy the type, never to drop real data.
+        const byId = new Map(subgoals.map((s) => [s.id, s]))
+        const resolve = (ids: ID[]): Subgoal[] => {
+          const out: Subgoal[] = []
+          for (const id of ids) {
+            const subgoal = byId.get(id)
+            if (subgoal) out.push(subgoal)
+          }
+          return out
+        }
+
+        const stations: RoadmapStation[] = []
+        for (const id of layout.order) {
+          const subgoal = byId.get(id)
+          if (!subgoal) continue
+          const node = layout.nodes[id]
+          stations.push({
+            subgoal,
+            activeSupportCount: node.activeSupportCount,
+            supportedBy: resolve(node.supportedByIds),
+            supports: resolve(node.supportsIds),
+          })
+        }
+
+        set({ currentRoadmap: { goalId, stations, cyclic: layout.cyclic } })
+      } finally {
+        set({ isLoadingRoadmap: false })
       }
     },
   }
