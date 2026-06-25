@@ -9,15 +9,23 @@
 // not engine-level progress calculation.
 
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, ChevronRight, Plus } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronRight,
+  Plus,
+  Sparkles,
+  CalendarClock,
+} from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import type { Dependency, ID, MilestoneStatus, SubgoalTree } from '@/core/types'
-import { SUBGOAL_STATUS_LABELS } from '@/core/constants'
+import { SUBGOAL_STATUS_LABELS, DEFAULT_DAILY_MINUTES } from '@/core/constants'
 import { useGoalStore } from '@/store/useGoalStore'
 import { RowActions } from '@/components/ui/RowActions'
 import { ProgressRing } from '@/components/progress/ProgressRing'
 import { MilestoneCard } from '@/features/goals/MilestoneCard'
 import { MilestoneCreationModal } from '@/features/goals/MilestoneCreationModal'
+import { SuggestedMilestonesModal } from '@/features/goals/SuggestedMilestonesModal'
+import { DailyPlanModal } from '@/features/goals/DailyPlanModal'
 import { TaskCreationModal } from '@/features/goals/TaskCreationModal'
 import { SubgoalCreationModal } from '@/features/goals/SubgoalCreationModal'
 import { SubgoalDependencies } from '@/features/goals/SubgoalDependencies'
@@ -25,6 +33,9 @@ import { TaskRow } from '@/features/goals/TaskRow'
 
 interface SubgoalSectionProps {
   data: SubgoalTree
+  // The parent goal's title — context the AI milestone suggester needs (the
+  // subgoal alone is ambiguous without the goal it serves). Passed from the page.
+  goalTitle: string
   // Every subgoal in this goal (for the dependency picker + title lookup) and
   // the loaded subgoal-type edges. Both come from the page, which owns the
   // single dependency-graph load.
@@ -34,6 +45,7 @@ interface SubgoalSectionProps {
 
 export function SubgoalSection({
   data,
+  goalTitle,
   allSubgoals,
   subgoalDependencies,
 }: SubgoalSectionProps) {
@@ -47,6 +59,8 @@ export function SubgoalSection({
   // Default expanded so the hierarchy is visible at a glance for now.
   const [expanded, setExpanded] = useState(true)
   const [isAddMilestoneOpen, setIsAddMilestoneOpen] = useState(false)
+  const [isSuggestOpen, setIsSuggestOpen] = useState(false)
+  const [isDailyPlanOpen, setIsDailyPlanOpen] = useState(false)
   const [isAddTaskOpen, setIsAddTaskOpen] = useState(false)
   const [isEditOpen, setIsEditOpen] = useState(false)
 
@@ -106,6 +120,11 @@ export function SubgoalSection({
   const participatesInDeps = subgoalDependencies.some(
     (e) => e.fromId === subgoal.id || e.toId === subgoal.id,
   )
+
+  // Minutes per session for this subgoal's daily plan (its own setting, or the
+  // gentle default). The plan's start day + length are derived in the store from
+  // the subgoal's existing tasks + deadline, not here.
+  const dailyMinutes = subgoal.estimatedDailyMinutes ?? DEFAULT_DAILY_MINUTES
 
   return (
     <div className="rounded-app-lg border border-app-border bg-app-surface">
@@ -200,12 +219,32 @@ export function SubgoalSection({
             </button>
             <button
               type="button"
+              onClick={() => setIsSuggestOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-app-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text transition hover:bg-app-border/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+            >
+              <Sparkles size={14} />
+              Suggest milestones
+            </button>
+            <button
+              type="button"
               onClick={() => setIsAddTaskOpen(true)}
               className="inline-flex items-center gap-1.5 rounded-app-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text transition hover:bg-app-border/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
             >
               <Plus size={14} />
               Add task
             </button>
+            {/* Daily plan is only meaningful for consistency subgoals (practiced
+                a fixed amount every day). */}
+            {subgoal.requiresConsistency ? (
+              <button
+                type="button"
+                onClick={() => setIsDailyPlanOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-app-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text transition hover:bg-app-border/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+              >
+                <CalendarClock size={14} />
+                Daily plan
+              </button>
+            ) : null}
           </div>
 
           <SubgoalDependencies
@@ -222,6 +261,35 @@ export function SubgoalSection({
         open={isAddMilestoneOpen}
         onClose={() => setIsAddMilestoneOpen(false)}
       />
+
+      {/* AI-suggested milestones for this subgoal (accept / edit / reject). */}
+      <SuggestedMilestonesModal
+        subgoalId={subgoal.id}
+        open={isSuggestOpen}
+        onClose={() => setIsSuggestOpen(false)}
+        context={{
+          goalTitle,
+          subgoalTitle: subgoal.title,
+          subgoalDescription: subgoal.description,
+          existingMilestoneTitles: milestones.map((m) => m.milestone.title),
+        }}
+      />
+
+      {/* AI daily plan for a consistency subgoal (preview / accept dated tasks). */}
+      {subgoal.requiresConsistency ? (
+        <DailyPlanModal
+          open={isDailyPlanOpen}
+          onClose={() => setIsDailyPlanOpen(false)}
+          request={{
+            subgoalId: subgoal.id,
+            subgoalTitle: subgoal.title,
+            subgoalDescription: subgoal.description,
+            goalTitle,
+            dailyMinutes,
+            ...(subgoal.targetDate ? { targetDate: subgoal.targetDate } : {}),
+          }}
+        />
+      ) : null}
 
       {/* Create a loose task (no milestoneId) directly under this subgoal. */}
       <TaskCreationModal

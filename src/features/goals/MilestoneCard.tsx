@@ -7,7 +7,7 @@
 // a `group` so the edit/delete actions reveal on hover.
 
 import { useEffect, useRef, useState } from 'react'
-import { Plus } from 'lucide-react'
+import { Plus, Sparkles } from 'lucide-react'
 import type { MilestoneTree } from '@/core/types'
 import { MILESTONE_STATUS_LABELS } from '@/core/constants'
 import { useGoalStore } from '@/store/useGoalStore'
@@ -65,6 +65,18 @@ export function MilestoneCard({
       <div className="group flex items-center justify-between gap-3">
         <h4 className="text-sm font-medium text-app-text">{milestone.title}</h4>
         <div className="flex items-center gap-2">
+          {/* Provenance: surface that this checkpoint came from an AI suggestion
+              the user accepted (the only place aiSuggested is set). Calm and
+              non-actionable — it informs, it doesn't change behaviour. */}
+          {milestone.aiSuggested ? (
+            <span
+              title="Suggested by AI"
+              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-app-border px-2 py-0.5 text-[11px] text-app-text-muted"
+            >
+              <Sparkles size={11} aria-hidden="true" />
+              AI
+            </span>
+          ) : null}
           <span className="shrink-0 rounded-full border border-app-border px-2 py-0.5 text-[11px] text-app-text-muted">
             {MILESTONE_STATUS_LABELS[milestone.status]}
           </span>

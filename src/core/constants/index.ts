@@ -61,6 +61,18 @@ export const DEFAULT_GOAL_PRIORITY: Priority = 'medium';
 // phases expose them.
 export const DEFAULT_SUBGOAL_STATUS: SubgoalStatus = 'active';
 
+// Default minutes-per-day suggested when a subgoal is marked as needing daily
+// consistency (Phase 5). Used as the form's fallback and the AI daily-plan's
+// per-task estimatedMinutes. A gentle, sustainable default rather than ambitious.
+export const DEFAULT_DAILY_MINUTES = 30;
+
+// How many days of daily sessions the AI plan covers at most — a bounded,
+// re-generatable window rather than the whole timeline to the deadline. Shared
+// by the daily-plan prompt (engine) and the subgoal UI that computes the day
+// count from any nearer deadline, so both agree on the ceiling. Lives in core
+// constants (not the engine) so the UI can read it without importing engine/.
+export const DAILY_PLAN_HORIZON = 14;
+
 // A new milestone defaults to 'active' (available to work on). 'locked' is
 // PARKED, not used: Phase 3 dependencies are SOFT (they strengthen, they do not
 // block), so nothing hard-locks a milestone today and no code sets this status.

@@ -7,7 +7,7 @@
 
 import { useEffect, useState, type ReactNode } from 'react'
 import type { ID, Subgoal } from '@/core/types'
-import { DEFAULT_SUBGOAL_STATUS } from '@/core/constants'
+import { DEFAULT_SUBGOAL_STATUS, DEFAULT_DAILY_MINUTES } from '@/core/constants'
 import { useGoalStore } from '@/store/useGoalStore'
 import { Modal } from '@/components/ui/Modal'
 
@@ -34,6 +34,11 @@ export function SubgoalCreationModal({
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [targetDate, setTargetDate] = useState('')
+  // Consistency = this subgoal is practiced a little every day (e.g. a language,
+  // DSA prep). When on, it can carry an AI-generated daily task plan, and the
+  // minutes/day drives that plan's per-task estimate.
+  const [requiresConsistency, setRequiresConsistency] = useState(false)
+  const [dailyMinutes, setDailyMinutes] = useState('')
   const [isSaving, setIsSaving] = useState(false)
 
   useEffect(() => {
@@ -41,10 +46,25 @@ export function SubgoalCreationModal({
     setTitle(subgoal?.title ?? '')
     setDescription(subgoal?.description ?? '')
     setTargetDate(subgoal?.targetDate ?? '')
+    setRequiresConsistency(subgoal?.requiresConsistency ?? false)
+    setDailyMinutes(
+      subgoal?.estimatedDailyMinutes != null
+        ? String(subgoal.estimatedDailyMinutes)
+        : '',
+    )
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
   const canSave = title.trim().length > 0 && !isSaving
+
+  // Resolve the minutes/day to persist: only meaningful when consistency is on.
+  // A blank or non-positive entry falls back to the gentle default so a daily
+  // plan always has a sane per-task estimate. Cleared entirely when off.
+  function resolveDailyMinutes(): number | undefined {
+    if (!requiresConsistency) return undefined
+    const parsed = Number.parseInt(dailyMinutes, 10)
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_DAILY_MINUTES
+  }
 
   function handleClose() {
     if (isSaving) return
@@ -56,12 +76,15 @@ export function SubgoalCreationModal({
     setIsSaving(true)
     try {
       if (isEdit && subgoal) {
-        // Edit patches only these fields; status / requiresConsistency / order
-        // are left untouched. targetDate || undefined lets a cleared date persist.
+        // Edit patches the form-exposed fields; status / order stay untouched.
+        // targetDate || undefined lets a cleared date persist. The consistency
+        // pair moves together: minutes is undefined whenever consistency is off.
         await editSubgoal(subgoal.id, {
           title: title.trim(),
           description: description.trim(),
           targetDate: targetDate || undefined,
+          requiresConsistency,
+          estimatedDailyMinutes: resolveDailyMinutes(),
         })
       } else {
         await addSubgoal({
@@ -69,8 +92,11 @@ export function SubgoalCreationModal({
           title: title.trim(),
           description: description.trim(),
           status: DEFAULT_SUBGOAL_STATUS,
-          requiresConsistency: false,
+          requiresConsistency,
           ...(targetDate ? { targetDate } : {}),
+          ...(resolveDailyMinutes() != null
+            ? { estimatedDailyMinutes: resolveDailyMinutes() }
+            : {}),
         })
       }
       onClose()
@@ -115,6 +141,39 @@ export function SubgoalCreationModal({
             className={inputClass}
           />
         </Field>
+
+        {/* Consistency: daily practice. When on, this subgoal can carry an
+            AI-generated daily task plan (see DailyPlanModal). */}
+        <label className="flex items-start gap-3">
+          <input
+            type="checkbox"
+            checked={requiresConsistency}
+            onChange={(e) => setRequiresConsistency(e.target.checked)}
+            className="mt-0.5 shrink-0 accent-app-text"
+          />
+          <span>
+            <span className="block text-sm font-medium text-app-text">
+              Needs daily consistency
+            </span>
+            <span className="mt-0.5 block text-xs text-app-text-muted">
+              For things you practice a little every day, like a language or
+              interview prep.
+            </span>
+          </span>
+        </label>
+
+        {requiresConsistency ? (
+          <Field label="Minutes per day">
+            <input
+              type="number"
+              min={1}
+              value={dailyMinutes}
+              onChange={(e) => setDailyMinutes(e.target.value)}
+              placeholder={String(DEFAULT_DAILY_MINUTES)}
+              className={inputClass}
+            />
+          </Field>
+        ) : null}
       </div>
 
       <div className="mt-6 flex justify-end gap-3">
