@@ -1,6 +1,7 @@
 import { db } from '../db';
 import { nanoid } from 'nanoid';
 import type { Subgoal, SubgoalStatus, ID } from '@/core/types';
+import { deleteDependenciesReferencing } from './dependencyRepository';
 
 // Create a subgoal. The caller owns goalId and order (a subgoal is meaningless
 // without a parent and a display position); we own identity and timestamps so
@@ -69,10 +70,27 @@ export async function updateSubgoal(
 // it. Wrapped in one rw transaction so the cascade is all-or-nothing (a failure
 // rolls back rather than leaving a partial orphan trail). Tasks are found by
 // subgoalId, which covers both milestone-grouped and loose tasks in one query.
+//
+// Also removes dependency edges in the SAME transaction so none outlive their
+// endpoints: edges referencing this subgoal (the subgoal graph) and edges
+// referencing any of its deleted tasks (the task graph). Task ids are collected
+// before the task rows are deleted.
 export async function deleteSubgoal(id: ID): Promise<void> {
-  await db.transaction('rw', db.subgoals, db.milestones, db.tasks, async () => {
-    await db.milestones.where('subgoalId').equals(id).delete();
-    await db.tasks.where('subgoalId').equals(id).delete();
-    await db.subgoals.delete(id);
-  });
+  await db.transaction(
+    'rw',
+    db.subgoals,
+    db.milestones,
+    db.tasks,
+    db.dependencies,
+    async () => {
+      const taskIds = await db.tasks
+        .where('subgoalId')
+        .equals(id)
+        .primaryKeys();
+      await db.milestones.where('subgoalId').equals(id).delete();
+      await db.tasks.where('subgoalId').equals(id).delete();
+      await db.subgoals.delete(id);
+      await deleteDependenciesReferencing([id, ...taskIds]);
+    },
+  );
 }
