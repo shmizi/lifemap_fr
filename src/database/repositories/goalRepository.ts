@@ -15,6 +15,7 @@
 import { nanoid } from 'nanoid';
 import { db } from '../db';
 import type { Goal, ID, GoalStatus } from '@/core/types';
+import { deleteDependenciesReferencing } from './dependencyRepository';
 
 /**
  * Fields the CALLER provides. id/createdAt/updatedAt are generated here, so they
@@ -139,27 +140,37 @@ export async function updateGoal(
  * subgoalId (milestoneId is optional), so deleting by subgoalId covers both
  * milestone-grouped and loose tasks in one query. Deleting an unknown id stays a
  * no-op (the subgoal/task queries simply match nothing).
+ *
+ * Dependency edges go too, in the SAME transaction, so none outlive their
+ * endpoints: edges referencing any deleted subgoal (subgoal graph) or any
+ * deleted task (task graph). The subgoal and task ids are collected before their
+ * rows are removed.
  */
 export async function deleteGoal(id: ID): Promise<void> {
+  // Five tables exceed Dexie's variadic transaction overload, so the table list
+  // is passed as an array (same transaction semantics).
   await db.transaction(
     'rw',
-    db.goals,
-    db.subgoals,
-    db.milestones,
-    db.tasks,
+    [db.goals, db.subgoals, db.milestones, db.tasks, db.dependencies],
     async () => {
       const subgoalIds = await db.subgoals
         .where('goalId')
         .equals(id)
         .primaryKeys();
 
+      let taskIds: ID[] = [];
       if (subgoalIds.length > 0) {
+        taskIds = await db.tasks
+          .where('subgoalId')
+          .anyOf(subgoalIds)
+          .primaryKeys();
         await db.milestones.where('subgoalId').anyOf(subgoalIds).delete();
         await db.tasks.where('subgoalId').anyOf(subgoalIds).delete();
       }
 
       await db.subgoals.where('goalId').equals(id).delete();
       await db.goals.delete(id);
+      await deleteDependenciesReferencing([...subgoalIds, ...taskIds]);
     },
   );
 }

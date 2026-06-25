@@ -4,7 +4,8 @@ import { db } from '../db';
 import { createGoal, deleteGoal, type CreateGoalInput } from './goalRepository';
 import { createSubgoal, deleteSubgoal } from './subgoalRepository';
 import { createMilestone, deleteMilestone } from './milestoneRepository';
-import { createTask } from './taskRepository';
+import { createTask, deleteTask } from './taskRepository';
+import { createDependency } from './dependencyRepository';
 import type { Subgoal, Milestone, Task } from '@/core/types';
 
 // Factories mirror hierarchyRepository.test.ts — seed real rows through the real
@@ -71,6 +72,7 @@ beforeEach(async () => {
     db.subgoals.clear(),
     db.milestones.clear(),
     db.tasks.clear(),
+    db.dependencies.clear(),
   ]);
 });
 
@@ -130,6 +132,107 @@ describe('deleteSubgoal (cascade)', () => {
     expect(await db.subgoals.get(sibling.id)).toBeDefined();
     expect(await db.tasks.get(siblingTask.id)).toBeDefined();
     expect(await db.goals.get(goal.id)).toBeDefined();
+  });
+});
+
+describe('dependency edge cleanup on delete', () => {
+  it('deleteSubgoal removes edges referencing the subgoal or its tasks, sparing unrelated ones', async () => {
+    const goal = await createGoal(makeGoalInput());
+    const doomed = await createSubgoal(makeSubgoalInput(goal.id, { order: 0 }));
+    const sibling = await createSubgoal(makeSubgoalInput(goal.id, { order: 1 }));
+    const other = await createSubgoal(makeSubgoalInput(goal.id, { order: 2 }));
+    const doomedTask = await createTask(makeTaskInput(doomed.id));
+    const siblingTask = await createTask(makeTaskInput(sibling.id));
+
+    // Subgoal edges touching `doomed` (either direction) + a task edge touching
+    // its task — all should go. An edge between the two survivors must stay.
+    const edgeInto = await createDependency({
+      fromId: sibling.id,
+      toId: doomed.id,
+      type: 'subgoal',
+    });
+    const edgeOut = await createDependency({
+      fromId: doomed.id,
+      toId: other.id,
+      type: 'subgoal',
+    });
+    const taskEdge = await createDependency({
+      fromId: doomedTask.id,
+      toId: siblingTask.id,
+      type: 'task',
+    });
+    const survivor = await createDependency({
+      fromId: sibling.id,
+      toId: other.id,
+      type: 'subgoal',
+    });
+
+    await deleteSubgoal(doomed.id);
+
+    expect(await db.dependencies.get(edgeInto.id)).toBeUndefined();
+    expect(await db.dependencies.get(edgeOut.id)).toBeUndefined();
+    expect(await db.dependencies.get(taskEdge.id)).toBeUndefined();
+    expect(await db.dependencies.get(survivor.id)).toBeDefined();
+  });
+
+  it('deleteGoal removes every edge referencing its subgoals and tasks, sparing another goal', async () => {
+    const goal = await createGoal(makeGoalInput({ title: 'doomed' }));
+    const subA = await createSubgoal(makeSubgoalInput(goal.id, { order: 0 }));
+    const subB = await createSubgoal(makeSubgoalInput(goal.id, { order: 1 }));
+    const taskA = await createTask(makeTaskInput(subA.id, { order: 0 }));
+    const taskB = await createTask(makeTaskInput(subB.id, { order: 0 }));
+
+    const subgoalEdge = await createDependency({
+      fromId: subA.id,
+      toId: subB.id,
+      type: 'subgoal',
+    });
+    const taskEdge = await createDependency({
+      fromId: taskA.id,
+      toId: taskB.id,
+      type: 'task',
+    });
+
+    // An unrelated goal with its own subgoal edge must be untouched.
+    const keep = await createGoal(makeGoalInput({ title: 'keep' }));
+    const keepA = await createSubgoal(makeSubgoalInput(keep.id, { order: 0 }));
+    const keepB = await createSubgoal(makeSubgoalInput(keep.id, { order: 1 }));
+    const keepEdge = await createDependency({
+      fromId: keepA.id,
+      toId: keepB.id,
+      type: 'subgoal',
+    });
+
+    await deleteGoal(goal.id);
+
+    expect(await db.dependencies.get(subgoalEdge.id)).toBeUndefined();
+    expect(await db.dependencies.get(taskEdge.id)).toBeUndefined();
+    expect(await db.dependencies.get(keepEdge.id)).toBeDefined();
+  });
+
+  it('deleteTask removes task edges referencing the task, sparing unrelated ones', async () => {
+    const goal = await createGoal(makeGoalInput());
+    const sub = await createSubgoal(makeSubgoalInput(goal.id));
+    const doomedTask = await createTask(makeTaskInput(sub.id, { order: 0 }));
+    const keepTask1 = await createTask(makeTaskInput(sub.id, { order: 1 }));
+    const keepTask2 = await createTask(makeTaskInput(sub.id, { order: 2 }));
+
+    const edge = await createDependency({
+      fromId: keepTask1.id,
+      toId: doomedTask.id,
+      type: 'task',
+    });
+    const survivor = await createDependency({
+      fromId: keepTask1.id,
+      toId: keepTask2.id,
+      type: 'task',
+    });
+
+    await deleteTask(doomedTask.id);
+
+    expect(await db.tasks.get(doomedTask.id)).toBeUndefined();
+    expect(await db.dependencies.get(edge.id)).toBeUndefined();
+    expect(await db.dependencies.get(survivor.id)).toBeDefined();
   });
 });
 

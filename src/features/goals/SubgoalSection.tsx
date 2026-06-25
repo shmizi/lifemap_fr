@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, Plus } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
-import type { ID, MilestoneStatus, SubgoalTree } from '@/core/types'
+import type { Dependency, ID, MilestoneStatus, SubgoalTree } from '@/core/types'
 import { SUBGOAL_STATUS_LABELS } from '@/core/constants'
 import { useGoalStore } from '@/store/useGoalStore'
 import { RowActions } from '@/components/ui/RowActions'
@@ -20,13 +20,23 @@ import { MilestoneCard } from '@/features/goals/MilestoneCard'
 import { MilestoneCreationModal } from '@/features/goals/MilestoneCreationModal'
 import { TaskCreationModal } from '@/features/goals/TaskCreationModal'
 import { SubgoalCreationModal } from '@/features/goals/SubgoalCreationModal'
+import { SubgoalDependencies } from '@/features/goals/SubgoalDependencies'
 import { TaskRow } from '@/features/goals/TaskRow'
 
 interface SubgoalSectionProps {
   data: SubgoalTree
+  // Every subgoal in this goal (for the dependency picker + title lookup) and
+  // the loaded subgoal-type edges. Both come from the page, which owns the
+  // single dependency-graph load.
+  allSubgoals: { id: ID; title: string }[]
+  subgoalDependencies: Dependency[]
 }
 
-export function SubgoalSection({ data }: SubgoalSectionProps) {
+export function SubgoalSection({
+  data,
+  allSubgoals,
+  subgoalDependencies,
+}: SubgoalSectionProps) {
   const { subgoal, milestones, looseTasks } = data
   const removeSubgoal = useGoalStore((s) => s.removeSubgoal)
   // Engine-computed momentum for this subgoal (the store derives it from the
@@ -90,6 +100,13 @@ export function SubgoalSection({ data }: SubgoalSectionProps) {
     looseTasks.length + milestones.reduce((sum, m) => sum + m.tasks.length, 0)
   const isEmpty = milestoneCount === 0 && looseTasks.length === 0
 
+  // Whether this subgoal is either end of any dependency edge — if so, deleting
+  // it also removes those edges (handled atomically in the repository), so the
+  // delete confirmation says so.
+  const participatesInDeps = subgoalDependencies.some(
+    (e) => e.fromId === subgoal.id || e.toId === subgoal.id,
+  )
+
   return (
     <div className="rounded-app-lg border border-app-border bg-app-surface">
       <div className="group flex items-center gap-3 p-4">
@@ -132,6 +149,9 @@ export function SubgoalSection({ data }: SubgoalSectionProps) {
           entityLabel="subgoal"
           onEdit={() => setIsEditOpen(true)}
           onDelete={() => removeSubgoal(subgoal.id)}
+          confirmHint={
+            participatesInDeps ? 'Dependency links removed too.' : undefined
+          }
         />
       </div>
 
@@ -187,6 +207,12 @@ export function SubgoalSection({ data }: SubgoalSectionProps) {
               Add task
             </button>
           </div>
+
+          <SubgoalDependencies
+            subgoalId={subgoal.id}
+            allSubgoals={allSubgoals}
+            edges={subgoalDependencies}
+          />
         </div>
       ) : null}
 

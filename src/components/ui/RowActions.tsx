@@ -17,9 +17,17 @@ interface RowActionsProps {
   onDelete: () => void | Promise<void>
   // What is being acted on, used for accessible labels e.g. "subgoal".
   entityLabel: string
+  // Optional side-effect warning shown only in the confirm step, e.g. that
+  // dependency links will also be removed. Omit when the delete has no extras.
+  confirmHint?: string
 }
 
-export function RowActions({ onEdit, onDelete, entityLabel }: RowActionsProps) {
+export function RowActions({
+  onEdit,
+  onDelete,
+  entityLabel,
+  confirmHint,
+}: RowActionsProps) {
   const [confirming, setConfirming] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
 
@@ -38,6 +46,9 @@ export function RowActions({ onEdit, onDelete, entityLabel }: RowActionsProps) {
   if (confirming) {
     return (
       <div className="flex shrink-0 items-center gap-1">
+        {confirmHint ? (
+          <span className="mr-1 text-xs text-app-text-muted">{confirmHint}</span>
+        ) : null}
         <button
           type="button"
           onClick={handleDelete}

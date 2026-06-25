@@ -5,6 +5,7 @@ import {
   createDependency,
   getDependenciesBlocking,
   getDependenciesDownstreamOf,
+  getDependenciesByType,
   deleteDependency,
   type CreateDependencyInput,
 } from './dependencyRepository';
@@ -77,6 +78,22 @@ describe('dependencyRepository', () => {
     expect(await getDependenciesBlocking('B')).toEqual([edge]);
     expect(await getDependenciesBlocking('A')).toEqual([]);
     expect(await getDependenciesDownstreamOf('B')).toEqual([]);
+  });
+
+  it('getDependenciesByType returns only edges of that type', async () => {
+    await createDependency(makeInput({ fromId: 'T1', toId: 'T2', type: 'task' }));
+    await createDependency(makeInput({ fromId: 'T2', toId: 'T3', type: 'task' }));
+    await createDependency(
+      makeInput({ fromId: 'S1', toId: 'S2', type: 'subgoal' })
+    );
+
+    const taskEdges = await getDependenciesByType('task');
+    const subgoalEdges = await getDependenciesByType('subgoal');
+
+    expect(taskEdges).toHaveLength(2);
+    expect(taskEdges.every((d) => d.type === 'task')).toBe(true);
+    expect(subgoalEdges).toHaveLength(1);
+    expect(subgoalEdges[0].fromId).toBe('S1');
   });
 
   it('deleteDependency removes the row', async () => {

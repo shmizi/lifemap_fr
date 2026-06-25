@@ -13,6 +13,7 @@ import { ArrowLeft, Plus, Pencil } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { ROUTES, GOAL_CATEGORY_OPTIONS } from '@/core/constants'
 import { useGoalTree } from '@/core/hooks/useGoalTree'
+import { useDependencyGraph } from '@/core/hooks/useDependencyGraph'
 import { useGoalStore } from '@/store/useGoalStore'
 import { ProgressRing } from '@/components/progress/ProgressRing'
 import { SubgoalSection } from '@/features/goals/SubgoalSection'
@@ -30,6 +31,9 @@ export function GoalDetailPage() {
   // the (in practice unreachable) empty case.
   const { id = '' } = useParams<{ id: string }>()
   const { tree, isLoading } = useGoalTree(id)
+  // The subgoal dependency graph (loaded once here, passed down to each section).
+  // Edges are global across goals; a section filters to its own subgoal by id.
+  const { dependencies: subgoalDependencies } = useDependencyGraph('subgoal')
   // Whole-goal momentum, derived from the same tree by the store. Shown in the
   // header above the per-subgoal rings; hidden until the goal has tasks.
   const goalProgress = useGoalStore((s) => s.currentGoalProgress)
@@ -57,6 +61,12 @@ export function GoalDetailPage() {
   }
 
   const { goal, subgoals } = tree
+  // Flat {id, title} list of this goal's subgoals, for each section's dependency
+  // picker and supporter-title lookup.
+  const allSubgoals = subgoals.map((st) => ({
+    id: st.subgoal.id,
+    title: st.subgoal.title,
+  }))
 
   return (
     <section className="mx-auto max-w-3xl">
@@ -142,6 +152,8 @@ export function GoalDetailPage() {
               <SubgoalSection
                 key={subgoalTree.subgoal.id}
                 data={subgoalTree}
+                allSubgoals={allSubgoals}
+                subgoalDependencies={subgoalDependencies}
               />
             ))}
           </div>

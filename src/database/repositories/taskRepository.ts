@@ -22,6 +22,7 @@
 import { nanoid } from 'nanoid';
 import { db } from '@/database/db';
 import type { ID, ISODate, Task, TaskStatus } from '@/core/types';
+import { deleteDependenciesReferencing } from './dependencyRepository';
 
 /**
  * Fields the CALLER provides. id/createdAt/updatedAt are generated here, so they
@@ -142,8 +143,12 @@ export async function updateTask(id: ID, changes: UpdateTaskInput): Promise<void
 }
 
 export async function deleteTask(id: ID): Promise<void> {
-  // Task is a leaf node — no child entities to cascade.
-  // TODO Phase 3: clear any task->task Dependency rows referencing this id, to
-  // avoid dangling dependencies once the dependency engine exists.
-  await db.tasks.delete(id);
+  // Task is a leaf node — no child entities to cascade. But it can be a
+  // task->task dependency endpoint, and an edge must never outlive its endpoint,
+  // so any edge referencing this task is removed in the SAME transaction as the
+  // task delete (keeps the graph consistent even if one step were to fail).
+  await db.transaction('rw', db.tasks, db.dependencies, async () => {
+    await db.tasks.delete(id);
+    await deleteDependenciesReferencing([id]);
+  });
 }

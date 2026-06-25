@@ -369,9 +369,9 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       if (get().currentGoalTree?.goal.id === id) await refreshCurrentTree()
     },
 
-    // deleteGoal now cascades its subtree (subgoals/milestones/tasks) in the
-    // repository. TODO(Phase 3): also clear Dependency rows referencing the
-    // deleted entities — that needs the dependency engine.
+    // deleteGoal cascades its subtree (subgoals/milestones/tasks) AND removes any
+    // dependency edges referencing the deleted subgoals/tasks, atomically in the
+    // repository transaction. Nothing extra to do here.
     removeGoal: async (id) => {
       await deleteGoal(id)
       await refreshGoalsAndProgress()
@@ -448,8 +448,9 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       await updateSubgoal(id, changes)
       await refreshCurrentTree()
     },
-    // deleteSubgoal now cascades its milestones + tasks in the repository.
-    // TODO(Phase 3): clear Dependency rows referencing the deleted entities.
+    // deleteSubgoal cascades its milestones + tasks AND removes any dependency
+    // edges referencing this subgoal or its deleted tasks, atomically in the
+    // repository transaction. Nothing extra to do here.
     removeSubgoal: async (id) => {
       await deleteSubgoal(id)
       await refreshCurrentTree()
