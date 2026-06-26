@@ -17,6 +17,7 @@ import {
   BarChart2,
   Settings,
   Compass,
+  Telescope,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useUIStore } from '@/store/useUIStore'
@@ -36,6 +37,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Goals',     to: ROUTES.GOALS,     icon: Target },
   { label: 'Roadmap',   to: ROUTES.ROADMAP,   icon: Map },
   { label: 'Reviews',   to: ROUTES.REVIEWS,   icon: BarChart2 },
+  { label: 'Discovery', to: ROUTES.DISCOVERY, icon: Telescope },
   { label: 'Settings',  to: ROUTES.SETTINGS,  icon: Settings },
 ]
 

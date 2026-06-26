@@ -53,7 +53,12 @@ export function parseSuggestionList(
 // success, or null if no parseable array is present. Handles the two common
 // deviations from the asked-for "bare array" format: markdown code fences and
 // surrounding prose. Never throws — JSON.parse failures resolve to null.
-function extractJsonArray(text: string): unknown[] | null {
+//
+// Exported because it is the genuinely shared low-level primitive: the discovery
+// extraction parser (parsers/opportunities.ts) reads the SAME tolerant JSON-array
+// format, just with richer per-item validation. Keeping this one extractor avoids
+// duplicating the fence/prose-stripping logic in two places.
+export function extractJsonArray(text: string): unknown[] | null {
   // Slice from the first '[' to the last ']' — this strips ```json fences and
   // any leading/trailing prose in one step. If either bracket is missing there
   // is no array to read.

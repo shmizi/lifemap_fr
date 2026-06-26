@@ -15,6 +15,7 @@
 
 import type { AIProvider } from '@/services/ai/AIProvider'
 import type { AIRequest, AIResponse } from '@/engine/ai/types'
+import type { OpportunityType } from '@/core/types'
 
 // Generic checkpoint phases a SUBGOAL is broken into (milestone prompts).
 const MILESTONE_TEMPLATES: ReadonlyArray<{ title: string; description: string }> =
@@ -69,6 +70,14 @@ export class MockAI implements AIProvider {
       return Promise.resolve({ text: this.dailyPlan(request, daysLine) })
     }
 
+    // An opportunity-extraction prompt is the only one with a "Query:" line —
+    // check it before the Subgoal/Goal branch (which it would otherwise fall
+    // through to, as it carries neither line).
+    const queryLine = extractLine(request, 'Query')
+    if (queryLine !== null) {
+      return Promise.resolve({ text: this.opportunities(queryLine) })
+    }
+
     // Otherwise: a milestone prompt describes a "Subgoal:"; a subgoal prompt
     // describes only a "Goal:". Branch on that for the right kind of items.
     const subgoal = extractLine(request, 'Subgoal')
@@ -100,6 +109,31 @@ export class MockAI implements AIProvider {
     }))
     return JSON.stringify(sessions)
   }
+
+  // Turn a search query into a few deterministic, query-flavoured STRUCTURED
+  // opportunities — the extraction step's output, in the exact JSON shape
+  // parsers/opportunities.ts expects. A real model reads the actual search results
+  // carried in the prompt; the mock echoes the query into titles/urls/tags so the
+  // pipeline yields coherent, varied results with no network or key. Deterministic
+  // urls (query-slugged) let the store's dedup-by-url collapse repeated searches.
+  private opportunities(query: string): string {
+    const q = query.trim().length > 0 ? query.trim() : 'opportunities'
+    const key = slug(q)
+    const tags = q
+      .split(/\s+/)
+      .filter((word) => word.length >= 2)
+      .slice(0, 3)
+    const candidates = OPPORTUNITY_TEMPLATES.map((template) => ({
+      type: template.type,
+      title: `${q} ${template.titleSuffix}`,
+      organization: template.organization,
+      description: `${template.description} (related to ${q}).`,
+      url: `https://example.org/opportunity/${key}/${template.type}`,
+      location: template.location,
+      tags,
+    }))
+    return JSON.stringify(candidates)
+  }
 }
 
 // Cycling session focuses for the mock daily plan, and a safety cap so a bad
@@ -111,6 +145,47 @@ const DAILY_FOCUSES: ReadonlyArray<string> = [
   'Apply and self-test',
 ]
 const DAILY_FOCUS_HORIZON = 14
+
+// Generic opportunity shapes the mock extraction returns, one per common type, so
+// a developer sees a varied, plausible set. Distinct from the suggestion/daily
+// templates so each AI feature's mock output is visibly its own.
+const OPPORTUNITY_TEMPLATES: ReadonlyArray<{
+  type: OpportunityType
+  titleSuffix: string
+  organization: string
+  description: string
+  location: string
+}> = [
+  {
+    type: 'internship',
+    titleSuffix: 'Research Internship',
+    organization: 'Example University',
+    description: 'A hands-on internship for students',
+    location: 'Remote',
+  },
+  {
+    type: 'scholarship',
+    titleSuffix: 'Scholarship',
+    organization: 'Example Foundation',
+    description: 'Funding for promising students',
+    location: 'Worldwide',
+  },
+  {
+    type: 'hackathon',
+    titleSuffix: 'Hackathon',
+    organization: 'Example Labs',
+    description: 'A weekend build sprint',
+    location: 'Hybrid',
+  },
+]
+
+// URL-safe slug of the query — keeps the mock's opportunity urls stable per query.
+function slug(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
 
 // Best-effort pull of a "Label: value" line from the request, matching the lines
 // the prompt builders write. Returns null if absent so the caller can branch /

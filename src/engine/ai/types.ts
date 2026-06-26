@@ -20,7 +20,7 @@
 // A provider swap (MockAI -> Anthropic in Phase 6) changes ONE service file and
 // nothing here, in the prompts, the parsers, or the store.
 
-import type { ID, ISODate } from '@/core/types'
+import type { ID, ISODate, OpportunityType } from '@/core/types'
 
 // ── Provider-agnostic transport ──────────────────────────────────────────────
 
@@ -144,4 +144,42 @@ export interface ScheduledDailyTask {
   description?: string
   scheduledDate: ISODate
   estimatedMinutes: number
+}
+
+// ── Feature: opportunity discovery (extraction) ──────────────────────────────
+// Discovery has TWO external boundaries: a SEARCH provider (Tavily/Firecrawl)
+// returns raw web results, then the AI provider EXTRACTS structured opportunities
+// from them. These shapes describe the extraction step. Deterministic relevance
+// scoring against the user's goals is a SEPARATE, pure concern
+// (engine/discovery/scoreRelevance) — extraction only structures, it never scores.
+
+// One raw web result from the search provider, before any structuring. The search
+// provider returns these; the extraction prompt feeds them to the model.
+export interface RawSearchResult {
+  title: string
+  url: string
+  // A short excerpt the search provider returns alongside the result.
+  snippet: string
+}
+
+// What the extraction prompt builder needs: the query that was searched and the
+// raw results it returned. The model turns these into OpportunityCandidates.
+export interface OpportunityExtractionContext {
+  query: string
+  results: RawSearchResult[]
+}
+
+// One structured opportunity the model extracted from the raw results. Descriptive
+// fields ONLY: relevanceScore/matchedGoalIds are computed later by the pure
+// discovery engine, and source/lifecycle flags by the store. Mirrors the store's
+// DiscoveredOpportunityInput minus `source` (always 'ai_search' for a found one).
+export interface OpportunityCandidate {
+  type: OpportunityType
+  title: string
+  organization: string
+  description: string
+  url: string
+  deadline?: ISODate
+  location?: string
+  tags: string[]
 }
