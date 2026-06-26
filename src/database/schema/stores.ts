@@ -19,7 +19,10 @@
 export const DB_NAME = 'lifemap';
 
 // Bump this number whenever STORES changes shape; Dexie runs migrations per version.
-export const DB_VERSION = 1;
+// v2 (Phase 6): added the `opportunities` table. Adding a brand-new table is a
+// deliberate schema change — Dexie creates the new object store on upgrade and
+// leaves every existing table untouched, so no data migration is needed.
+export const DB_VERSION = 2;
 
 // Record<string, string> (not `as const`) so it slots cleanly into Dexie's
 // stores() parameter type, which expects a mutable string map.
@@ -45,4 +48,13 @@ export const STORES: Record<string, string> = {
 
   // Snapshots: per-goal history, ordered by capture time.
   snapshots: 'id, goalId, capturedAt',
+
+  // Opportunities (Phase 6 — Discovery). Primary key only. We deliberately index
+  // NOTHING else: `dismissed`/`addedToRoadmap` are booleans (not valid IndexedDB
+  // keys), `relevanceScore` is the natural sort yet optional, and `matchedGoalIds`
+  // is an array — all are filtered/sorted in memory, where record counts are tiny.
+  // A multiEntry `*matchedGoalIds` index (for "opportunities supporting goal X")
+  // is the obvious future addition, but only when a real query consumes it, and
+  // it would ride its own DB_VERSION bump.
+  opportunities: 'id',
 };

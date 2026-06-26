@@ -23,6 +23,7 @@ import type {
   Dependency,
   UserProfile,
   ProgressSnapshot,
+  Opportunity,
 } from '@/core/types';
 import { DB_NAME, DB_VERSION, STORES } from '@/database/schema/stores';
 
@@ -38,6 +39,7 @@ export class LifeMapDB extends Dexie {
   dependencies!: Table<Dependency, string>;
   profile!: Table<UserProfile, string>;
   snapshots!: Table<ProgressSnapshot, string>;
+  opportunities!: Table<Opportunity, string>;
 
   constructor() {
     super(DB_NAME);

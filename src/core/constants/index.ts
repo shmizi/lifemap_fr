@@ -9,6 +9,7 @@ import type {
   SubgoalStatus,
   MilestoneStatus,
   TaskStatus,
+  OpportunityType,
 } from '@/core/types';
 
 export const APP_NAME = 'LifeMap' as const;
@@ -20,6 +21,7 @@ export const ROUTES = {
   GOAL_DETAIL: '/goals/:id',
   ROADMAP:     '/roadmap',
   REVIEWS:     '/reviews',
+  DISCOVERY:   '/discovery',
   SETTINGS:    '/settings',
 } as const;
 
@@ -160,3 +162,26 @@ export const PRIORITY_LABELS: Record<Priority, string> = {
   high:     'High',
   critical: 'Critical',
 };
+
+// ─── Discovery (Phase 6) ─────────────────────────────────────────────────────
+// Human-readable labels for each opportunity type, kept here so the manual-add
+// form (and any future filter UI) never hardcodes the canonical type strings.
+// `value` is the stored OpportunityType; `label` is display-only. Ordered for a
+// sensible <select>.
+export const OPPORTUNITY_TYPE_OPTIONS: ReadonlyArray<{
+  value: OpportunityType;
+  label: string;
+}> = [
+  { value: 'internship',  label: 'Internship' },
+  { value: 'hackathon',   label: 'Hackathon' },
+  { value: 'scholarship', label: 'Scholarship' },
+  { value: 'conference',  label: 'Conference' },
+  { value: 'competition', label: 'Competition' },
+  { value: 'program',     label: 'Program' },
+  { value: 'other',       label: 'Other' },
+];
+
+export const OPPORTUNITY_TYPE_LABELS: Record<OpportunityType, string> =
+  Object.fromEntries(
+    OPPORTUNITY_TYPE_OPTIONS.map((o) => [o.value, o.label]),
+  ) as Record<OpportunityType, string>;
