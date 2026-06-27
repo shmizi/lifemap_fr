@@ -2,10 +2,12 @@
 //
 // Pass `milestone` to edit it; pass `subgoalId` to create a new one under that
 // subgoal. The Milestone type has no due-date field, so the form is title +
-// description. The overlay/panel shell now lives in the shared <Modal> component.
-// Writes go through addMilestone / editMilestone (store owns order).
+// description. The overlay/panel shell lives in the shared <Modal> component; the
+// form body lives in <MilestoneForm>, mounted fresh each open so its fields seed
+// from props via useState initializers (no set-state-in-effect re-seed). Writes go
+// through addMilestone / editMilestone (store owns order).
 
-import { useEffect, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { ID, Milestone } from '@/core/types'
 import { DEFAULT_MILESTONE_STATUS } from '@/core/constants'
 import { useGoalStore } from '@/store/useGoalStore'
@@ -27,20 +29,56 @@ export function MilestoneCreationModal({
   subgoalId,
   milestone,
 }: MilestoneCreationModalProps) {
+  const isEdit = milestone !== undefined
+  // isSaving lives in the wrapper (not the remounted form) so closing can be
+  // blocked mid-save — backdrop, X and Escape all route through handleClose.
+  const [isSaving, setIsSaving] = useState(false)
+
+  function handleClose() {
+    if (isSaving) return
+    onClose()
+  }
+
+  return (
+    <Modal
+      isOpen={open}
+      onClose={handleClose}
+      title={isEdit ? 'Edit milestone' : 'Add a milestone'}
+    >
+      {open ? (
+        <MilestoneForm
+          subgoalId={subgoalId}
+          milestone={milestone}
+          isSaving={isSaving}
+          setIsSaving={setIsSaving}
+          onClose={onClose}
+        />
+      ) : null}
+    </Modal>
+  )
+}
+
+interface MilestoneFormProps {
+  subgoalId?: ID
+  milestone?: Milestone
+  isSaving: boolean
+  setIsSaving: (saving: boolean) => void
+  onClose: () => void
+}
+
+function MilestoneForm({
+  subgoalId,
+  milestone,
+  isSaving,
+  setIsSaving,
+  onClose,
+}: MilestoneFormProps) {
   const addMilestone = useGoalStore((s) => s.addMilestone)
   const editMilestone = useGoalStore((s) => s.editMilestone)
   const isEdit = milestone !== undefined
 
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [isSaving, setIsSaving] = useState(false)
-
-  useEffect(() => {
-    if (!open) return
-    setTitle(milestone?.title ?? '')
-    setDescription(milestone?.description ?? '')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
+  const [title, setTitle] = useState(milestone?.title ?? '')
+  const [description, setDescription] = useState(milestone?.description ?? '')
 
   const canSave = title.trim().length > 0 && !isSaving
 
@@ -74,11 +112,7 @@ export function MilestoneCreationModal({
   }
 
   return (
-    <Modal
-      isOpen={open}
-      onClose={handleClose}
-      title={isEdit ? 'Edit milestone' : 'Add a milestone'}
-    >
+    <>
       <div className="mt-5 space-y-4">
         <Field label="Title">
           <input
@@ -119,7 +153,7 @@ export function MilestoneCreationModal({
           {isSaving ? 'Saving...' : isEdit ? 'Save changes' : 'Add milestone'}
         </button>
       </div>
-    </Modal>
+    </>
   )
 }
 

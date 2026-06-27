@@ -1,13 +1,16 @@
 // RowActions — a compact edit + delete control reused by the subgoal, milestone,
-// and task rows. Revealed on hover/focus (desktop-first); delete is a two-step
-// confirm so a stray click can't destroy work.
+// and task rows. On devices that can hover (mouse/trackpad) it stays hidden until
+// the row is hovered or focused; on touch devices, where there is no hover to
+// reveal it, it is ALWAYS visible. Delete is a two-step confirm so a stray tap
+// can't destroy work.
 //
 // Pure UI: it owns no data and performs no writes. It calls the onEdit / onDelete
 // callbacks the parent provides. Extracted because three entities need the exact
 // same affordance — reuse at the point of need, not a speculative abstraction.
 //
 // REQUIRES: the parent element must have the Tailwind `group` class, so the
-// reveal-on-hover (group-hover) works.
+// reveal-on-hover (group-hover) works. The hide-at-rest is gated behind the
+// `can-hover` variant, so it never hides the controls on a touch device.
 
 import { useState } from 'react'
 import { Pencil, Trash2 } from 'lucide-react'
@@ -70,7 +73,7 @@ export function RowActions({
   }
 
   return (
-    <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100">
+    <div className="flex shrink-0 items-center gap-0.5 transition can-hover:opacity-0 can-hover:focus-within:opacity-100 can-hover:group-hover:opacity-100">
       <button
         type="button"
         onClick={onEdit}

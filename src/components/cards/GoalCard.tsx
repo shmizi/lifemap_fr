@@ -148,7 +148,7 @@ export function GoalCard({ goal }: GoalCardProps) {
             type="button"
             onClick={() => setConfirming(true)}
             aria-label={`Delete goal: ${goal.title}`}
-            className="rounded-md p-1.5 text-app-text-muted opacity-0 transition hover:text-red-600 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30 group-hover:opacity-100"
+            className="rounded-md p-1.5 text-app-text-muted transition hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30 can-hover:opacity-0 can-hover:focus-visible:opacity-100 can-hover:group-hover:opacity-100"
           >
             <Trash2 size={16} />
           </button>

@@ -1,14 +1,19 @@
 import { createBrowserRouter } from 'react-router-dom'
 import { AppLayout } from '@/app/layout/AppLayout'
-import { DashboardPage } from '@/pages/DashboardPage'
-import { GoalsPage } from '@/pages/GoalsPage'
-import { GoalDetailPage } from '@/pages/GoalDetailPage'
-import { RoadmapPage } from '@/pages/RoadmapPage'
-import { WeeklyReviewPage } from '@/pages/WeeklyReviewPage'
-import { DiscoveryPage } from '@/pages/DiscoveryPage'
-import { SettingsPage } from '@/pages/SettingsPage'
 import { ROUTES } from '@/core/constants'
+import {
+  DashboardPage,
+  GoalsPage,
+  GoalDetailPage,
+  RoadmapPage,
+  WeeklyReviewPage,
+  DiscoveryPage,
+  SettingsPage,
+} from '@/app/router/lazyPages'
 
+// The page elements below are code-split (see lazyPages). The shared Suspense
+// boundary lives in AppLayout, around the <Outlet />, so the sidebar and topbar
+// stay put while a page chunk arrives — only the content region shows a fallback.
 export const router = createBrowserRouter([
   {
     path: '/',

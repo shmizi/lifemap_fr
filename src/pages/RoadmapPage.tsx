@@ -24,20 +24,20 @@ export function RoadmapPage() {
   const loadGoals = useGoalStore((s) => s.loadGoals)
   const selectedGoalId = useGoalStore((s) => s.selectedGoalId)
 
-  const [goalId, setGoalId] = useState('')
+  const [picked, setPicked] = useState('')
 
   useEffect(() => {
     void loadGoals()
   }, [loadGoals])
 
-  // Default the shown goal once the list arrives: prefer the goal the user was
-  // last focused on (if it still exists), otherwise the first one. Guarded on an
-  // empty selection so it never overrides a manual pick.
-  useEffect(() => {
-    if (goalId || goals.length === 0) return
-    const preferred = goals.find((g) => g.id === selectedGoalId)
-    setGoalId(preferred ? preferred.id : goals[0].id)
-  }, [goalId, goals, selectedGoalId])
+  // The shown goal: the user's manual pick if it still exists, otherwise a
+  // sensible default — the goal they were last focused on (if present), else the
+  // first. Derived during render rather than synced into state via an effect, so
+  // there's no set-state churn and no flicker before the default lands.
+  const goalId =
+    picked && goals.some((g) => g.id === picked)
+      ? picked
+      : (goals.find((g) => g.id === selectedGoalId)?.id ?? goals[0]?.id ?? '')
 
   const { roadmap, isLoading } = useRoadmap(goalId)
   // The store holds one roadmap at a time; while switching goals the previous
@@ -84,7 +84,7 @@ export function RoadmapPage() {
             <select
               id="roadmap-goal"
               value={goalId}
-              onChange={(e) => setGoalId(e.target.value)}
+              onChange={(e) => setPicked(e.target.value)}
               className="mt-1.5 w-full rounded-app border border-app-border bg-app-surface px-3 py-2 text-sm text-app-text focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
             >
               {goals.map((goal) => (

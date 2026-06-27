@@ -1,12 +1,14 @@
 // GoalCreationModal — create OR edit a goal.
 //
 // Despite the historical name, this modal handles both: pass a `goal` to edit it,
-// omit it to create a new one. The overlay/panel shell now lives in the shared
-// <Modal> component; this file keeps only the form state and submit logic. Form
-// state is local; writes go through the store's addGoal / editGoal actions — the
-// component never touches the database.
+// omit it to create a new one. The overlay/panel shell lives in the shared
+// <Modal> component; the form body lives in <GoalForm>, mounted fresh each time
+// the modal opens so its fields seed straight from props via useState
+// initializers — no set-state-in-effect re-seed step. Form state is local; writes
+// go through the store's addGoal / editGoal actions — the component never touches
+// the database.
 
-import { useEffect, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { Goal, GoalCategory } from '@/core/types'
 import {
   GOAL_CATEGORY_OPTIONS,
@@ -26,29 +28,54 @@ const inputClass =
   'w-full rounded-app-lg border border-app-border bg-app-surface px-3 py-2 text-sm text-app-text placeholder:text-app-text-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30'
 
 export function GoalCreationModal({ open, onClose, goal }: GoalCreationModalProps) {
+  const isEdit = goal !== undefined
+  // isSaving lives in the wrapper (not the remounted form) so closing can be
+  // blocked mid-save — backdrop, X and Escape all route through handleClose.
+  const [isSaving, setIsSaving] = useState(false)
+
+  function handleClose() {
+    if (isSaving) return
+    onClose()
+  }
+
+  return (
+    <Modal
+      isOpen={open}
+      onClose={handleClose}
+      title={isEdit ? 'Edit goal' : 'Create a goal'}
+    >
+      {/* Mounted only while open, so each open is a fresh mount whose useState
+          initializers seed from `goal` (edit) or empty (create). */}
+      {open ? (
+        <GoalForm
+          goal={goal}
+          isSaving={isSaving}
+          setIsSaving={setIsSaving}
+          onClose={onClose}
+        />
+      ) : null}
+    </Modal>
+  )
+}
+
+interface GoalFormProps {
+  goal?: Goal
+  isSaving: boolean
+  setIsSaving: (saving: boolean) => void
+  onClose: () => void
+}
+
+function GoalForm({ goal, isSaving, setIsSaving, onClose }: GoalFormProps) {
   const addGoal = useGoalStore((s) => s.addGoal)
   const editGoal = useGoalStore((s) => s.editGoal)
   const isEdit = goal !== undefined
 
-  const [title, setTitle] = useState('')
+  const [title, setTitle] = useState(goal?.title ?? '')
   const [category, setCategory] = useState<GoalCategory>(
-    GOAL_CATEGORY_OPTIONS[0].value,
+    goal?.category ?? GOAL_CATEGORY_OPTIONS[0].value,
   )
-  const [targetDate, setTargetDate] = useState('')
-  const [description, setDescription] = useState('')
-  const [isSaving, setIsSaving] = useState(false)
-
-  // Re-seed the form every time the modal opens: from the goal (edit) or empty
-  // (create). Keyed on `open` only, so an in-progress edit is never clobbered by
-  // an unrelated re-render.
-  useEffect(() => {
-    if (!open) return
-    setTitle(goal?.title ?? '')
-    setCategory(goal?.category ?? GOAL_CATEGORY_OPTIONS[0].value)
-    setTargetDate(goal?.targetDate ?? '')
-    setDescription(goal?.description ?? '')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
+  const [targetDate, setTargetDate] = useState(goal?.targetDate ?? '')
+  const [description, setDescription] = useState(goal?.description ?? '')
 
   const canSave = title.trim().length > 0 && targetDate.length > 0 && !isSaving
 
@@ -85,11 +112,7 @@ export function GoalCreationModal({ open, onClose, goal }: GoalCreationModalProp
   }
 
   return (
-    <Modal
-      isOpen={open}
-      onClose={handleClose}
-      title={isEdit ? 'Edit goal' : 'Create a goal'}
-    >
+    <>
       <div className="mt-5 space-y-4">
         <Field label="Title">
           <input
@@ -153,7 +176,7 @@ export function GoalCreationModal({ open, onClose, goal }: GoalCreationModalProp
           {isSaving ? 'Saving...' : isEdit ? 'Save changes' : 'Create goal'}
         </button>
       </div>
-    </Modal>
+    </>
   )
 }
 

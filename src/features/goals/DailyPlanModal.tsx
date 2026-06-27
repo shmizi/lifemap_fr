@@ -9,7 +9,10 @@
 // presentation + local state; never imports a provider, the engine, or a repo.
 //
 // One modal per entity is the established convention, so this is its own
-// component, parallel to the milestone/subgoal suggestion modals.
+// component, parallel to the milestone/subgoal suggestion modals. The fetch body
+// lives in <DailyPlanBody>, mounted fresh on each open and on Retry, so it starts
+// in 'loading' via its useState initializer and the fetch effect only updates
+// state inside its async callbacks.
 
 import { useEffect, useState } from 'react'
 import { format, parseISO } from 'date-fns'
@@ -42,25 +45,61 @@ interface DraftDay {
 const inputClass =
   'w-full rounded-app-lg border border-app-border bg-app-surface px-3 py-2 text-sm text-app-text placeholder:text-app-text-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30'
 
-export function DailyPlanModal({
-  open,
-  onClose,
+export function DailyPlanModal({ open, onClose, request }: DailyPlanModalProps) {
+  // isSaving lives in the wrapper (not the remounted body) so closing can be
+  // blocked mid-save. `attempt` is bumped by Retry to remount the body and re-run
+  // its mount-time fetch.
+  const [isSaving, setIsSaving] = useState(false)
+  const [attempt, setAttempt] = useState(0)
+
+  function handleClose() {
+    if (isSaving) return
+    onClose()
+  }
+
+  return (
+    <Modal isOpen={open} onClose={handleClose} title="Daily plan">
+      {open ? (
+        <DailyPlanBody
+          key={attempt}
+          request={request}
+          isSaving={isSaving}
+          setIsSaving={setIsSaving}
+          onRetry={() => setAttempt((a) => a + 1)}
+          onClose={onClose}
+        />
+      ) : null}
+    </Modal>
+  )
+}
+
+interface DailyPlanBodyProps {
+  request: DailyPlanRequest
+  isSaving: boolean
+  setIsSaving: (saving: boolean) => void
+  onRetry: () => void
+  onClose: () => void
+}
+
+function DailyPlanBody({
   request,
-}: DailyPlanModalProps) {
+  isSaving,
+  setIsSaving,
+  onRetry,
+  onClose,
+}: DailyPlanBodyProps) {
   const generateDailyPlan = useGoalStore((s) => s.generateDailyPlan)
   const addTask = useGoalStore((s) => s.addTask)
 
   const [phase, setPhase] = useState<Phase>('loading')
   const [drafts, setDrafts] = useState<DraftDay[]>([])
-  const [isSaving, setIsSaving] = useState(false)
   const [saveFailed, setSaveFailed] = useState(false)
-  const [reloadKey, setReloadKey] = useState(0)
 
+  // Fetch once on mount. The wrapper remounts this body on each open and on
+  // Retry, so a single mount-time fetch covers both cases — and every state
+  // update here happens inside the async callbacks, not synchronously.
   useEffect(() => {
-    if (!open) return
     let active = true
-    setPhase('loading')
-    setSaveFailed(false)
     generateDailyPlan(request)
       .then((plan) => {
         if (!active) return
@@ -82,7 +121,7 @@ export function DailyPlanModal({
       active = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, reloadKey])
+  }, [])
 
   const update = (index: number, patch: Partial<DraftDay>) =>
     setDrafts((prev) =>
@@ -126,7 +165,7 @@ export function DailyPlanModal({
   }
 
   return (
-    <Modal isOpen={open} onClose={handleClose} title="Daily plan">
+    <>
       {phase === 'loading' ? (
         <p className="mt-6 mb-2 animate-pulse text-sm text-app-text-muted">
           Building a daily plan for this subgoal...
@@ -143,11 +182,7 @@ export function DailyPlanModal({
             <button type="button" onClick={handleClose} className={secondaryBtn}>
               Cancel
             </button>
-            <button
-              type="button"
-              onClick={() => setReloadKey((k) => k + 1)}
-              className={primaryBtn}
-            >
+            <button type="button" onClick={onRetry} className={primaryBtn}>
               Try again
             </button>
           </div>
@@ -234,7 +269,7 @@ export function DailyPlanModal({
           </div>
         </div>
       ) : null}
-    </Modal>
+    </>
   )
 }
 

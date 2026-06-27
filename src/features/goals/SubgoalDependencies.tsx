@@ -102,7 +102,7 @@ export function SubgoalDependencies({
                 type="button"
                 onClick={() => removeDependency(edge.id)}
                 aria-label={`Remove dependency on ${titleOf(edge.fromId)}`}
-                className="rounded-md p-0.5 text-app-text-muted opacity-0 transition hover:text-red-600 focus:outline-none focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-app-text/30 group-hover/dep:opacity-100"
+                className="rounded-md p-0.5 text-app-text-muted transition hover:text-red-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30 can-hover:opacity-0 can-hover:focus-visible:opacity-100 can-hover:group-hover/dep:opacity-100"
               >
                 <X size={14} />
               </button>

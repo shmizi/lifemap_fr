@@ -101,13 +101,16 @@ export function SubgoalSection({
     prevStatuses.current = snapshot
   }, [milestones, expanded])
 
-  // Once expanded, the pending cards have been handed celebrateOnAppear; clear
-  // the set so a later collapse/expand cycle doesn't replay them.
-  useEffect(() => {
+  // Expand/collapse. Pending celebrations are only ever shown while expanded, so
+  // by the time the user collapses they've already played — clear them here, in
+  // the handler, so a later expand doesn't replay them (and so this reset is a
+  // plain event-handler setState, not a set-state-in-effect).
+  function toggleExpanded() {
     if (expanded && pendingCelebrations.size > 0) {
       setPendingCelebrations(new Set())
     }
-  }, [expanded, pendingCelebrations])
+    setExpanded((v) => !v)
+  }
 
   const milestoneCount = milestones.length
   const taskCount =
@@ -131,7 +134,7 @@ export function SubgoalSection({
       <div className="group flex items-center gap-3 p-4">
         <button
           type="button"
-          onClick={() => setExpanded((v) => !v)}
+          onClick={toggleExpanded}
           aria-expanded={expanded}
           className="flex flex-1 items-center gap-3 rounded-md text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
         >

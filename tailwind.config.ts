@@ -1,4 +1,5 @@
 import type { Config } from 'tailwindcss'
+import plugin from 'tailwindcss/plugin'
 
 const config: Config = {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
@@ -29,7 +30,15 @@ const config: Config = {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    // `can-hover:` applies only on devices that actually support hover (mouse /
+    // trackpad). Used to gate hover-reveal affordances: controls hidden until
+    // hover on the desktop, but ALWAYS visible on touch devices, where there is
+    // no hover to reveal them. The inverse of relying on a bare opacity-0 base.
+    plugin(({ addVariant }) => {
+      addVariant('can-hover', '@media (hover: hover)')
+    }),
+  ],
 }
 
 export default config

@@ -11,6 +11,9 @@
 //
 // One modal per entity is the established Phase 1 convention, so this is a
 // separate component from the milestone modal rather than a generic shared one.
+// The fetch body lives in <SuggestedSubgoalsBody>, mounted fresh on each open and
+// on Retry, so it starts in 'loading' via its useState initializer and the fetch
+// effect only ever updates state inside its async callbacks.
 
 import { useEffect, useState } from 'react'
 import type { ID } from '@/core/types'
@@ -44,20 +47,63 @@ export function SuggestedSubgoalsModal({
   goalId,
   context,
 }: SuggestedSubgoalsModalProps) {
+  // isSaving lives in the wrapper (not the remounted body) so closing can be
+  // blocked mid-save. `attempt` is bumped by Retry to remount the body and re-run
+  // its mount-time fetch.
+  const [isSaving, setIsSaving] = useState(false)
+  const [attempt, setAttempt] = useState(0)
+
+  function handleClose() {
+    if (isSaving) return
+    onClose()
+  }
+
+  return (
+    <Modal isOpen={open} onClose={handleClose} title="Suggested subgoals">
+      {open ? (
+        <SuggestedSubgoalsBody
+          key={attempt}
+          goalId={goalId}
+          context={context}
+          isSaving={isSaving}
+          setIsSaving={setIsSaving}
+          onRetry={() => setAttempt((a) => a + 1)}
+          onClose={onClose}
+        />
+      ) : null}
+    </Modal>
+  )
+}
+
+interface SuggestedSubgoalsBodyProps {
+  goalId: ID
+  context: SubgoalSuggestionContext
+  isSaving: boolean
+  setIsSaving: (saving: boolean) => void
+  onRetry: () => void
+  onClose: () => void
+}
+
+function SuggestedSubgoalsBody({
+  goalId,
+  context,
+  isSaving,
+  setIsSaving,
+  onRetry,
+  onClose,
+}: SuggestedSubgoalsBodyProps) {
   const suggestSubgoals = useGoalStore((s) => s.suggestSubgoals)
   const addSubgoal = useGoalStore((s) => s.addSubgoal)
 
   const [phase, setPhase] = useState<Phase>('loading')
   const [drafts, setDrafts] = useState<DraftSubgoal[]>([])
-  const [isSaving, setIsSaving] = useState(false)
   const [saveFailed, setSaveFailed] = useState(false)
-  const [reloadKey, setReloadKey] = useState(0)
 
+  // Fetch once on mount. The wrapper remounts this body on each open and on
+  // Retry, so a single mount-time fetch covers both cases — and every state
+  // update here happens inside the async callbacks, not synchronously.
   useEffect(() => {
-    if (!open) return
     let active = true
-    setPhase('loading')
-    setSaveFailed(false)
     suggestSubgoals(context)
       .then((suggestions) => {
         if (!active) return
@@ -77,7 +123,7 @@ export function SuggestedSubgoalsModal({
       active = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, reloadKey])
+  }, [])
 
   const update = (index: number, patch: Partial<DraftSubgoal>) =>
     setDrafts((prev) =>
@@ -118,7 +164,7 @@ export function SuggestedSubgoalsModal({
   }
 
   return (
-    <Modal isOpen={open} onClose={handleClose} title="Suggested subgoals">
+    <>
       {phase === 'loading' ? (
         <p className="mt-6 mb-2 animate-pulse text-sm text-app-text-muted">
           Thinking of the major parts of this goal...
@@ -135,11 +181,7 @@ export function SuggestedSubgoalsModal({
             <button type="button" onClick={handleClose} className={secondaryBtn}>
               Cancel
             </button>
-            <button
-              type="button"
-              onClick={() => setReloadKey((k) => k + 1)}
-              className={primaryBtn}
-            >
+            <button type="button" onClick={onRetry} className={primaryBtn}>
               Try again
             </button>
           </div>
@@ -238,7 +280,7 @@ export function SuggestedSubgoalsModal({
           </div>
         </div>
       ) : null}
-    </Modal>
+    </>
   )
 }
 

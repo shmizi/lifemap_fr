@@ -1,6 +1,7 @@
 import 'fake-indexeddb/auto'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { db } from '@/database/db'
+import * as repositories from '@/database/repositories'
 import {
   createGoal,
   getTasksBySubgoalId,
@@ -57,6 +58,7 @@ beforeEach(async () => {
     opportunities: [],
     isLoadingOpportunities: false,
     isDiscovering: false,
+    error: null,
   })
 })
 
@@ -203,6 +205,35 @@ describe('useDiscoveryStore', () => {
     const subgoal = await state().addToPlan(opp, goal.id)
 
     expect(subgoal.targetDate).toBeUndefined()
+  })
+
+  it('clearError dismisses a non-fatal error', () => {
+    useDiscoveryStore.setState({ error: 'boom' })
+    state().clearError()
+    expect(state().error).toBeNull()
+  })
+
+  it('surfaces a calm, non-fatal error when a post-write refresh read fails, but the write still lands', async () => {
+    const saved = await state().saveOpportunity(makeOpportunity())
+    expect(state().error).toBeNull()
+
+    // The write succeeds, but the re-read after it rejects once. The mutation must
+    // NOT look like it failed: it does not throw, the row IS updated, and the calm
+    // banner message is set instead.
+    const spy = vi
+      .spyOn(repositories, 'getAllOpportunities')
+      .mockRejectedValueOnce(new Error('read failed'))
+    await expect(state().dismissOpportunity(saved.id)).resolves.toBeUndefined()
+    expect(state().error).not.toBeNull()
+    spy.mockRestore()
+
+    // The dismiss write actually landed despite the failed read-back.
+    const rows = await repositories.getAllOpportunities()
+    expect(rows[0].dismissed).toBe(true)
+
+    // A later clean refresh clears the stale error.
+    await state().loadOpportunities()
+    expect(state().error).toBeNull()
   })
 
   it('loadOpportunities loads the catalogue and clears the loading flag', async () => {

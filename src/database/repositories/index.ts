@@ -9,5 +9,5 @@ export * from './taskRepository';
 export * from './hierarchyRepository';
 export * from './dependencyRepository';
 export * from './opportunityRepository';
-export { profileRepository } from './profileRepository';
+export * from './profileRepository';
 export { snapshotRepository } from './snapshotRepository';
