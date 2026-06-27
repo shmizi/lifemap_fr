@@ -10,9 +10,11 @@
 //
 // The store scores the candidate against the user's goals on save; this form only
 // collects the descriptive fields. Tags are entered as a comma-separated string
-// and split into the string[] the model stores.
+// and split into the string[] the model stores. The form body lives in
+// <OpportunityForm>, mounted fresh each open so its fields start empty via
+// useState initializers (no set-state-in-effect re-seed).
 
-import { useEffect, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { OpportunityType } from '@/core/types'
 import { OPPORTUNITY_TYPE_OPTIONS } from '@/core/constants'
 import { useDiscoveryStore } from '@/store/useDiscoveryStore'
@@ -37,9 +39,44 @@ function parseTags(raw: string): string[] {
 }
 
 export function AddOpportunityModal({ open, onClose }: AddOpportunityModalProps) {
+  // isSaving lives in the wrapper (not the remounted form) so closing can be
+  // blocked mid-save — backdrop, X and Escape all route through handleClose.
+  const [isSaving, setIsSaving] = useState(false)
+
+  function handleClose() {
+    if (isSaving) return
+    onClose()
+  }
+
+  return (
+    <Modal isOpen={open} onClose={handleClose} title="Add an opportunity">
+      {open ? (
+        <OpportunityForm
+          isSaving={isSaving}
+          setIsSaving={setIsSaving}
+          onClose={onClose}
+        />
+      ) : null}
+    </Modal>
+  )
+}
+
+interface OpportunityFormProps {
+  isSaving: boolean
+  setIsSaving: (saving: boolean) => void
+  onClose: () => void
+}
+
+function OpportunityForm({
+  isSaving,
+  setIsSaving,
+  onClose,
+}: OpportunityFormProps) {
   const saveOpportunity = useDiscoveryStore((s) => s.saveOpportunity)
 
-  const [type, setType] = useState<OpportunityType>(OPPORTUNITY_TYPE_OPTIONS[0].value)
+  const [type, setType] = useState<OpportunityType>(
+    OPPORTUNITY_TYPE_OPTIONS[0].value,
+  )
   const [title, setTitle] = useState('')
   const [organization, setOrganization] = useState('')
   const [url, setUrl] = useState('')
@@ -47,25 +84,9 @@ export function AddOpportunityModal({ open, onClose }: AddOpportunityModalProps)
   const [location, setLocation] = useState('')
   const [tags, setTags] = useState('')
   const [description, setDescription] = useState('')
-  const [isSaving, setIsSaving] = useState(false)
 
-  // Re-seed (clear) the form every time the modal opens. Keyed on `open` only, so
-  // typing is never clobbered by an unrelated re-render. Same pattern as the goal
-  // creation modal.
-  useEffect(() => {
-    if (!open) return
-    setType(OPPORTUNITY_TYPE_OPTIONS[0].value)
-    setTitle('')
-    setOrganization('')
-    setUrl('')
-    setDeadline('')
-    setLocation('')
-    setTags('')
-    setDescription('')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
-
-  const canSave = title.trim().length > 0 && organization.trim().length > 0 && !isSaving
+  const canSave =
+    title.trim().length > 0 && organization.trim().length > 0 && !isSaving
 
   function handleClose() {
     if (isSaving) return
@@ -95,7 +116,7 @@ export function AddOpportunityModal({ open, onClose }: AddOpportunityModalProps)
   }
 
   return (
-    <Modal isOpen={open} onClose={handleClose} title="Add an opportunity">
+    <>
       <div className="mt-5 space-y-4">
         <Field label="Type">
           <select
@@ -200,7 +221,7 @@ export function AddOpportunityModal({ open, onClose }: AddOpportunityModalProps)
           {isSaving ? 'Saving...' : 'Add opportunity'}
         </button>
       </div>
-    </Modal>
+    </>
   )
 }
 

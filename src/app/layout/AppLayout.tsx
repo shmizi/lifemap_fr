@@ -6,19 +6,32 @@
 // offset updates automatically when the user collapses the sidebar, and the
 // matching transition keeps the two in step.
 
+import { Suspense } from 'react'
 import { Outlet } from 'react-router-dom'
 import { Sidebar } from '@/app/layout/Sidebar'
 import { Topbar } from '@/app/layout/Topbar'
 import { ErrorBanner } from '@/components/ui/ErrorBanner'
 import { useUIStore } from '@/store/useUIStore'
 import { useGoalStore } from '@/store/useGoalStore'
+import { useDiscoveryStore } from '@/store/useDiscoveryStore'
 import { LAYOUT } from '@/core/constants/layout'
 
 export function AppLayout() {
   const sidebarOpen = useUIStore((state) => state.sidebarOpen)
-  // A non-fatal data error surfaced once, app-wide, just under the Topbar.
-  const error = useGoalStore((state) => state.error)
-  const clearError = useGoalStore((state) => state.clearError)
+  // A non-fatal data error surfaced once, app-wide, just under the Topbar. Both
+  // independent stores (goals + discovery) report through this ONE banner: the
+  // goal error takes precedence when both are set, and dismissing clears both so a
+  // single click always silences the strip.
+  const goalError = useGoalStore((state) => state.error)
+  const goalClearError = useGoalStore((state) => state.clearError)
+  const discoveryError = useDiscoveryStore((state) => state.error)
+  const discoveryClearError = useDiscoveryStore((state) => state.clearError)
+
+  const error = goalError ?? discoveryError
+  const clearError = () => {
+    goalClearError()
+    discoveryClearError()
+  }
 
   const sidebarWidth = sidebarOpen
     ? LAYOUT.SIDEBAR_WIDTH_OPEN
@@ -44,9 +57,24 @@ export function AppLayout() {
           className="flex-1"
           style={{ padding: LAYOUT.CONTENT_PADDING }}
         >
-          <Outlet />
+          {/* One Suspense boundary for the lazily-loaded route pages: the shell
+              (sidebar + topbar) stays mounted while a page chunk loads, so only
+              the content region shows the fallback. */}
+          <Suspense fallback={<RouteFallback />}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
+    </div>
+  )
+}
+
+// Calm placeholder shown in the content region while a route's code chunk loads.
+// Matches the app's quiet "...ing" loading register (see the modals / RoadmapPage).
+function RouteFallback() {
+  return (
+    <div className="flex min-h-[40vh] items-center justify-center">
+      <p className="animate-pulse text-sm text-app-text-muted">Loading...</p>
     </div>
   )
 }

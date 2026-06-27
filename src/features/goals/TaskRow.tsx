@@ -7,7 +7,7 @@
 // link. The outer row is a `group` so RowActions can reveal on hover.
 
 import { useState } from 'react'
-import { Circle, CheckCircle2, CalendarDays } from 'lucide-react'
+import { Circle, CheckCircle2, CalendarDays, Repeat } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import type { Task } from '@/core/types'
 import { PRIORITY_LABELS } from '@/core/constants'
@@ -68,6 +68,18 @@ export function TaskRow({ task }: TaskRowProps) {
       {showPriority ? (
         <span className="shrink-0 rounded-full border border-app-border px-2 py-0.5 text-[11px] text-app-text-muted">
           {PRIORITY_LABELS[task.priority]}
+        </span>
+      ) : null}
+
+      {/* Recurring marker — a task the user repeats regularly. Icon-only chip to
+          keep the row calm; the title says what it is. */}
+      {task.isRecurring ? (
+        <span
+          className="flex shrink-0 items-center rounded-full border border-app-border px-1.5 py-0.5 text-app-text-muted"
+          title="Recurring task"
+          aria-label="Recurring task"
+        >
+          <Repeat size={11} aria-hidden />
         </span>
       ) : null}
 

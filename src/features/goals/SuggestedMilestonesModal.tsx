@@ -8,6 +8,11 @@
 // is no AI-specific write path. This file is pure presentation + local state; it
 // never imports a provider, the engine, or a repository.
 //
+// The fetch body lives in <SuggestedMilestonesBody>, which the wrapper mounts
+// fresh on each open and on Retry. A fresh mount starts in the 'loading' phase via
+// its useState initializer, so the only state updates the fetch effect makes
+// happen inside its async callbacks — never synchronously in the effect body.
+//
 // Three calm states, never a crash:
 //   - loading  : the request is in flight
 //   - error    : the provider rejected (only a real backend can; offers retry)
@@ -48,24 +53,63 @@ export function SuggestedMilestonesModal({
   subgoalId,
   context,
 }: SuggestedMilestonesModalProps) {
+  // isSaving lives in the wrapper (not the remounted body) so closing can be
+  // blocked mid-save. `attempt` is bumped by Retry to remount the body and re-run
+  // its mount-time fetch.
+  const [isSaving, setIsSaving] = useState(false)
+  const [attempt, setAttempt] = useState(0)
+
+  function handleClose() {
+    if (isSaving) return
+    onClose()
+  }
+
+  return (
+    <Modal isOpen={open} onClose={handleClose} title="Suggested milestones">
+      {open ? (
+        <SuggestedMilestonesBody
+          key={attempt}
+          subgoalId={subgoalId}
+          context={context}
+          isSaving={isSaving}
+          setIsSaving={setIsSaving}
+          onRetry={() => setAttempt((a) => a + 1)}
+          onClose={onClose}
+        />
+      ) : null}
+    </Modal>
+  )
+}
+
+interface SuggestedMilestonesBodyProps {
+  subgoalId: ID
+  context: MilestoneSuggestionContext
+  isSaving: boolean
+  setIsSaving: (saving: boolean) => void
+  onRetry: () => void
+  onClose: () => void
+}
+
+function SuggestedMilestonesBody({
+  subgoalId,
+  context,
+  isSaving,
+  setIsSaving,
+  onRetry,
+  onClose,
+}: SuggestedMilestonesBodyProps) {
   const suggestMilestones = useGoalStore((s) => s.suggestMilestones)
   const addMilestone = useGoalStore((s) => s.addMilestone)
 
   const [phase, setPhase] = useState<Phase>('loading')
   const [drafts, setDrafts] = useState<DraftMilestone[]>([])
-  const [isSaving, setIsSaving] = useState(false)
   const [saveFailed, setSaveFailed] = useState(false)
-  // Bumped to re-run the fetch (open, and Retry). Keeping the effect keyed on a
-  // primitive avoids re-firing on the `context` object's changing identity.
-  const [reloadKey, setReloadKey] = useState(0)
 
+  // Fetch once on mount. The wrapper remounts this body on each open and on
+  // Retry, so a single mount-time fetch covers both cases — and every state
+  // update here happens inside the async callbacks, not synchronously.
   useEffect(() => {
-    if (!open) return
-    // `active` guards against a slow response from a previous open landing after
-    // the modal was closed/reopened and overwriting fresh state.
     let active = true
-    setPhase('loading')
-    setSaveFailed(false)
     suggestMilestones(context)
       .then((suggestions) => {
         if (!active) return
@@ -85,7 +129,7 @@ export function SuggestedMilestonesModal({
       active = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, reloadKey])
+  }, [])
 
   const update = (index: number, patch: Partial<DraftMilestone>) =>
     setDrafts((prev) =>
@@ -127,7 +171,7 @@ export function SuggestedMilestonesModal({
   }
 
   return (
-    <Modal isOpen={open} onClose={handleClose} title="Suggested milestones">
+    <>
       {phase === 'loading' ? (
         <p className="mt-6 mb-2 animate-pulse text-sm text-app-text-muted">
           Thinking of milestones for this subgoal...
@@ -144,11 +188,7 @@ export function SuggestedMilestonesModal({
             <button type="button" onClick={handleClose} className={secondaryBtn}>
               Cancel
             </button>
-            <button
-              type="button"
-              onClick={() => setReloadKey((k) => k + 1)}
-              className={primaryBtn}
-            >
+            <button type="button" onClick={onRetry} className={primaryBtn}>
               Try again
             </button>
           </div>
@@ -247,7 +287,7 @@ export function SuggestedMilestonesModal({
           </div>
         </div>
       ) : null}
-    </Modal>
+    </>
   )
 }
 

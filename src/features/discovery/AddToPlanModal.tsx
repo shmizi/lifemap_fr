@@ -5,10 +5,12 @@
 //
 // The goal <select> defaults to the opportunity's strongest matched goal (so the
 // common case is one click), but lets the user file it anywhere — which also
-// covers opportunities that matched no goal at all.
+// covers opportunities that matched no goal at all. The body lives in <PlanForm>,
+// mounted fresh each open so the selection seeds from props via a useState
+// initializer (no set-state-in-effect re-seed).
 
-import { useEffect, useMemo, useState } from 'react'
-import type { ID, Opportunity } from '@/core/types'
+import { useState } from 'react'
+import type { Goal, ID, Opportunity } from '@/core/types'
 import { useGoalStore } from '@/store/useGoalStore'
 import { useDiscoveryStore } from '@/store/useDiscoveryStore'
 import { Modal } from '@/components/ui/Modal'
@@ -22,29 +24,54 @@ interface AddToPlanModalProps {
 const inputClass =
   'w-full rounded-app-lg border border-app-border bg-app-surface px-3 py-2 text-sm text-app-text focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30'
 
+// The strongest matched goal that still exists, else the first goal — the
+// sensible default selection (works for 0 / 1 / many matched goals).
+function pickDefaultGoalId(opportunity: Opportunity, goals: Goal[]): ID {
+  const matched = opportunity.matchedGoalIds.find((id) =>
+    goals.some((g) => g.id === id),
+  )
+  return matched ?? goals[0]?.id ?? ''
+}
+
 export function AddToPlanModal({ open, onClose, opportunity }: AddToPlanModalProps) {
+  // isSaving lives in the wrapper (not the remounted form) so closing can be
+  // blocked mid-save — backdrop, X and Escape all route through handleClose.
+  const [isSaving, setIsSaving] = useState(false)
+
+  function handleClose() {
+    if (isSaving) return
+    onClose()
+  }
+
+  return (
+    <Modal isOpen={open} onClose={handleClose} title="Add to plan">
+      {open ? (
+        <PlanForm
+          opportunity={opportunity}
+          isSaving={isSaving}
+          setIsSaving={setIsSaving}
+          onClose={onClose}
+        />
+      ) : null}
+    </Modal>
+  )
+}
+
+interface PlanFormProps {
+  opportunity: Opportunity
+  isSaving: boolean
+  setIsSaving: (saving: boolean) => void
+  onClose: () => void
+}
+
+function PlanForm({ opportunity, isSaving, setIsSaving, onClose }: PlanFormProps) {
   const goals = useGoalStore((s) => s.goals)
   const addToPlan = useDiscoveryStore((s) => s.addToPlan)
 
-  const [goalId, setGoalId] = useState<ID>('')
-  const [isSaving, setIsSaving] = useState(false)
-
-  // The strongest matched goal that still exists, else the first goal — the
-  // sensible default selection.
-  const defaultGoalId = useMemo(() => {
-    const matched = opportunity.matchedGoalIds.find((id) =>
-      goals.some((g) => g.id === id),
-    )
-    return matched ?? goals[0]?.id ?? ''
-  }, [opportunity.matchedGoalIds, goals])
-
-  // Re-seed the selection each time the modal opens, keyed on `open` so an
-  // in-progress pick is never clobbered by an unrelated re-render.
-  useEffect(() => {
-    if (!open) return
-    setGoalId(defaultGoalId)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
+  // Seed the selection once on mount from the strongest matched goal.
+  const [goalId, setGoalId] = useState<ID>(() =>
+    pickDefaultGoalId(opportunity, goals),
+  )
 
   const hasGoals = goals.length > 0
   const canSave = hasGoals && goalId.length > 0 && !isSaving
@@ -66,7 +93,7 @@ export function AddToPlanModal({ open, onClose, opportunity }: AddToPlanModalPro
   }
 
   return (
-    <Modal isOpen={open} onClose={handleClose} title="Add to plan">
+    <>
       {hasGoals ? (
         <div className="mt-5 space-y-4">
           <label className="block">
@@ -123,6 +150,6 @@ export function AddToPlanModal({ open, onClose, opportunity }: AddToPlanModalPro
           {isSaving ? 'Adding...' : 'Add to plan'}
         </button>
       </div>
-    </Modal>
+    </>
   )
 }

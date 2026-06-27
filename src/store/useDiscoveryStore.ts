@@ -47,6 +47,16 @@ import { aiProvider } from '@/services/ai'
 import { searchProvider } from '@/services/opportunities'
 import { useGoalStore } from '@/store/useGoalStore'
 
+// User-facing copy for this store's NON-FATAL failure states — the same calm,
+// generic register as useGoalStore's plumbing. A discovery WRITE still throws to
+// its caller (the modal handles save failures inline); these cover the read-back
+// and initial-load paths the user did not directly trigger and could not otherwise
+// see fail. Surfaced once, app-wide, via the shared ErrorBanner.
+const REFRESH_ERROR_MESSAGE =
+  'Something went wrong updating opportunities. What you see may be out of date.'
+const LOAD_ERROR_MESSAGE =
+  'Something went wrong loading opportunities. Please try again.'
+
 // Compose the subgoal description from an opportunity, folding in the organization
 // and link so neither is lost when it becomes a plan item (the subgoal model has
 // no url/organization fields of its own).
@@ -88,6 +98,14 @@ interface DiscoveryState {
   // so the UI can show progress and disable a second concurrent run.
   isDiscovering: boolean
 
+  // A single, calm, NON-FATAL message set when an opportunity load or post-write
+  // refresh fails (e.g. an IndexedDB read rejects). Null when all is well. The app
+  // shell surfaces it in the SAME ErrorBanner as useGoalStore's error; clearError
+  // dismisses it. Mirrors useGoalStore's settleRefreshes parity, per the Phase 6
+  // known-debt note.
+  error: string | null
+  clearError: () => void
+
   loadOpportunities: () => Promise<void>
   saveOpportunity: (input: DiscoveredOpportunityInput) => Promise<Opportunity>
   // Run the full discovery pipeline for a query and persist the new finds.
@@ -105,22 +123,36 @@ interface DiscoveryState {
 export const useDiscoveryStore = create<DiscoveryState>()((set, get) => {
   // Re-fetch the catalogue in place (no loading-flag flip -> no flicker),
   // mirroring useDependencyStore.refreshLoaded. Called after every mutation so the
-  // cached list never drifts from the table.
-  const refresh = async (): Promise<void> => {
-    set({ opportunities: await getAllOpportunities() })
+  // cached list never drifts from the table. BEST EFFORT, like useGoalStore's
+  // settleRefreshes: it runs AFTER a successful write, so a failed re-read must not
+  // make the mutation look like it failed — it NEVER throws. It owns the error flag
+  // either way: a rejected read raises the calm refresh message, a clean read
+  // clears any stale error.
+  const settleRefresh = async (): Promise<void> => {
+    try {
+      set({ opportunities: await getAllOpportunities(), error: null })
+    } catch {
+      set({ error: REFRESH_ERROR_MESSAGE })
+    }
   }
 
   return {
     opportunities: [],
     isLoadingOpportunities: false,
     isDiscovering: false,
+    error: null,
+    clearError: () => set({ error: null }),
 
     // First load: flips the loading flag for the initial paint (use on mount of a
     // discovery view), like loadDependencies / loadGoalTree.
     loadOpportunities: async () => {
       set({ isLoadingOpportunities: true })
       try {
-        set({ opportunities: await getAllOpportunities() })
+        set({ opportunities: await getAllOpportunities(), error: null })
+      } catch {
+        // Initial load is not a write — a failure here is non-fatal: surface the
+        // calm banner rather than throwing into the mounting view.
+        set({ error: LOAD_ERROR_MESSAGE })
       } finally {
         set({ isLoadingOpportunities: false })
       }
@@ -159,7 +191,7 @@ export const useDiscoveryStore = create<DiscoveryState>()((set, get) => {
         addedToRoadmap: false,
         dismissed: false,
       })
-      await refresh()
+      await settleRefresh()
       return created
     },
 
@@ -208,7 +240,7 @@ export const useDiscoveryStore = create<DiscoveryState>()((set, get) => {
     // already-set flag (the patch just re-writes the same value).
     dismissOpportunity: async (id) => {
       await updateOpportunity(id, { dismissed: true })
-      await refresh()
+      await settleRefresh()
     },
 
     // Records the "Add to Plan" intent flag only. markAddedToRoadmap is the low-
@@ -216,7 +248,7 @@ export const useDiscoveryStore = create<DiscoveryState>()((set, get) => {
     // calls it.
     markAddedToRoadmap: async (id) => {
       await updateOpportunity(id, { addedToRoadmap: true })
-      await refresh()
+      await settleRefresh()
     },
 
     // Turn an accepted opportunity into real plan work under the chosen goal. The
@@ -255,7 +287,7 @@ export const useDiscoveryStore = create<DiscoveryState>()((set, get) => {
     // (the repository's delete is).
     removeOpportunity: async (id) => {
       await deleteOpportunity(id)
-      await refresh()
+      await settleRefresh()
     },
   }
 })

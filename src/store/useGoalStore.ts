@@ -794,7 +794,24 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       // (affecting completeness) or move the task to a different milestone, so
       // both the old and the new milestone may need reconciling.
       const before = await getTaskById(id)
-      await updateTask(id, changes)
+      // Moving a task to a different milestone changes its group, and `order` is
+      // scoped per group (same milestoneId, or both undefined for loose). Recompute
+      // it for the destination so the task lands at the END and can't collide with
+      // an order already used there. The store owns `order`; the form only sends the
+      // chosen milestoneId. A same-group "move" (unchanged milestoneId) skips this.
+      let patch = changes
+      if (
+        before &&
+        'milestoneId' in changes &&
+        changes.milestoneId !== before.milestoneId
+      ) {
+        const subgoalTasks = await getTasksBySubgoalId(before.subgoalId)
+        const groupOrders = subgoalTasks
+          .filter((t) => t.id !== id && t.milestoneId === changes.milestoneId)
+          .map((t) => t.order)
+        patch = { ...changes, order: nextOrder(groupOrders) }
+      }
+      await updateTask(id, patch)
       const affected = new Set<ID>()
       if (before?.milestoneId) affected.add(before.milestoneId)
       // 'milestoneId' present in changes means it was (re)assigned, even to
