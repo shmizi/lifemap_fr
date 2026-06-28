@@ -7,11 +7,14 @@
 // the create/edit modals). Appearance reads useUIStore directly and needs no load.
 
 import { useProfile } from '@/core/hooks/useProfile'
+import { useUserContext } from '@/core/hooks/useUserContext'
 import { ProfileSection } from '@/features/settings/ProfileSection'
+import { UserContextSection } from '@/features/settings/UserContextSection'
 import { AppearanceSection } from '@/features/settings/AppearanceSection'
 
 export function SettingsPage() {
   const { profile, isLoading } = useProfile()
+  const { userContext, isLoading: isLoadingContext } = useUserContext()
 
   return (
     <section className="mx-auto max-w-3xl">
@@ -34,6 +37,18 @@ export function SettingsPage() {
           // must not remount the form (that would wipe the "Saved" confirmation
           // and discard the values the user is looking at).
           <ProfileSection profile={profile} />
+        )}
+
+        {isLoadingContext ? (
+          <div className="rounded-app-lg border border-app-border bg-app-surface p-6">
+            <p className="animate-pulse text-sm text-app-text-muted">
+              Loading your context...
+            </p>
+          </div>
+        ) : (
+          // Same "mount after load" pattern as ProfileSection: the form seeds from
+          // the loaded context via useState initializers, then owns its own state.
+          <UserContextSection context={userContext} />
         )}
 
         <AppearanceSection />

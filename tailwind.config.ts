@@ -20,13 +20,35 @@ const config: Config = {
         'app-border':      'var(--color-border)',
         'app-warning':     'var(--color-warning)',
         'app-danger':      'var(--color-danger)',
+
+        // Per-section map pigments + their solid washes. One identity per screen.
+        'accent-dashboard':      'var(--accent-dashboard)',
+        'accent-dashboard-wash': 'var(--accent-dashboard-wash)',
+        'accent-goals':          'var(--accent-goals)',
+        'accent-goals-wash':     'var(--accent-goals-wash)',
+        'accent-roadmap':        'var(--accent-roadmap)',
+        'accent-roadmap-wash':   'var(--accent-roadmap-wash)',
+        'accent-reviews':        'var(--accent-reviews)',
+        'accent-reviews-wash':   'var(--accent-reviews-wash)',
+        'accent-discovery':      'var(--accent-discovery)',
+        'accent-discovery-wash': 'var(--accent-discovery-wash)',
+        'accent-settings':       'var(--accent-settings)',
+        'accent-settings-wash':  'var(--accent-settings-wash)',
       },
       borderRadius: {
         'app': '10px',
         'app-lg': '16px',
       },
       fontFamily: {
+        // `sans` stays the default body face; `display` is the literary serif
+        // used for headings; `mono` is the tabular numeral face.
         sans: ['Inter', 'system-ui', 'sans-serif'],
+        display: ['Fraunces', 'Georgia', 'serif'],
+        mono: ['Space Grotesk', 'ui-monospace', 'monospace'],
+      },
+      boxShadow: {
+        card: 'var(--shadow-card)',
+        pop: 'var(--shadow-pop)',
       },
     },
   },

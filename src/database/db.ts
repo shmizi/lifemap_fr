@@ -24,6 +24,8 @@ import type {
   UserProfile,
   ProgressSnapshot,
   Opportunity,
+  UserContext,
+  GoalContext,
 } from '@/core/types';
 import { DB_NAME, DB_VERSION, STORES } from '@/database/schema/stores';
 
@@ -40,6 +42,10 @@ export class LifeMapDB extends Dexie {
   profile!: Table<UserProfile, string>;
   snapshots!: Table<ProgressSnapshot, string>;
   opportunities!: Table<Opportunity, string>;
+  // Phase 9 — AI personalization context. userContext keyed by its fixed single
+  // id; goalContext keyed by goalId (one row per goal).
+  userContext!: Table<UserContext, string>;
+  goalContext!: Table<GoalContext, string>;
 
   constructor() {
     super(DB_NAME);

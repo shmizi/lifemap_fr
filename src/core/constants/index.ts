@@ -10,6 +10,10 @@ import type {
   MilestoneStatus,
   TaskStatus,
   OpportunityType,
+  LifeSituation,
+  TimeOfDay,
+  WorkRhythm,
+  DeadlineHardness,
 } from '@/core/types';
 
 export const APP_NAME = 'LifeMap' as const;
@@ -185,3 +189,69 @@ export const OPPORTUNITY_TYPE_LABELS: Record<OpportunityType, string> =
   Object.fromEntries(
     OPPORTUNITY_TYPE_OPTIONS.map((o) => [o.value, o.label]),
   ) as Record<OpportunityType, string>;
+
+// ─── Phase 9 — AI personalization context ────────────────────────────────────
+// Option lists + defaults for the onboarding flow (standing UserContext) and the
+// per-goal intake (GoalContext). `value` is the stored enum; `label` is display.
+// Kept here so the forms never hardcode these strings, mirroring every other
+// option list above.
+
+export const LIFE_SITUATION_OPTIONS: ReadonlyArray<{
+  value: LifeSituation;
+  label: string;
+}> = [
+  { value: 'student', label: 'Student' },
+  { value: 'working', label: 'Working' },
+  { value: 'both',    label: 'Studying and working' },
+  { value: 'other',   label: 'Other' },
+];
+
+export const TIME_OF_DAY_OPTIONS: ReadonlyArray<{
+  value: TimeOfDay;
+  label: string;
+}> = [
+  { value: 'morning',  label: 'Mornings' },
+  { value: 'evening',  label: 'Evenings' },
+  { value: 'flexible', label: 'No strong preference' },
+];
+
+export const WORK_RHYTHM_OPTIONS: ReadonlyArray<{
+  value: WorkRhythm;
+  label: string;
+}> = [
+  { value: 'structured', label: 'Structured and steady' },
+  { value: 'flexible',   label: 'Flexible, in bursts' },
+];
+
+// Soft listed first so it is the gentle default the <select> lands on.
+export const DEADLINE_HARDNESS_OPTIONS: ReadonlyArray<{
+  value: DeadlineHardness;
+  label: string;
+}> = [
+  { value: 'soft', label: 'Flexible target — the date can move' },
+  { value: 'hard', label: 'Hard deadline — missing it means missing the goal' },
+];
+
+// Short weekday labels, index 0 = Sunday .. 6 = Saturday (matches Date.getDay()
+// and UserContext.lightDays). Used by the onboarding "days off" toggles.
+export const WEEKDAY_LABELS: readonly string[] = [
+  'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat',
+];
+
+// Defaults for a first-run UserContext: a gentle, common starting point so the
+// onboarding form only strictly needs a name, the rest pre-filled and editable.
+export const DEFAULT_USER_CONTEXT: {
+  situation: LifeSituation;
+  lightDays: number[];
+  bestTimeOfDay: TimeOfDay;
+  workRhythm: WorkRhythm;
+} = {
+  situation: 'student',
+  lightDays: [],
+  bestTimeOfDay: 'flexible',
+  workRhythm: 'structured',
+};
+
+// A new goal's intake defaults to a SOFT deadline — the conservative choice, so a
+// goal is never silently treated as unmissable unless the user says so.
+export const DEFAULT_DEADLINE_HARDNESS: DeadlineHardness = 'soft';

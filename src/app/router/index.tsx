@@ -5,7 +5,6 @@ import {
   DashboardPage,
   GoalsPage,
   GoalDetailPage,
-  RoadmapPage,
   WeeklyReviewPage,
   DiscoveryPage,
   SettingsPage,
@@ -24,7 +23,9 @@ export const router = createBrowserRouter([
       // Detail route. Static '/goals' above is matched ahead of this dynamic
       // '/goals/:id' by React Router's ranking, so order here is not fragile.
       { path: ROUTES.GOAL_DETAIL,  element: <GoalDetailPage /> },
-      { path: ROUTES.ROADMAP,      element: <RoadmapPage /> },
+      // Roadmap retired — its journey now lives on the Dashboard's living map.
+      // The roadmap ENGINE (buildRoadmap / computeLifeMapLayout) and the store's
+      // loadRoadmap remain; only the standalone screen is gone.
       { path: ROUTES.REVIEWS,      element: <WeeklyReviewPage /> },
       { path: ROUTES.DISCOVERY,    element: <DiscoveryPage /> },
       { path: ROUTES.SETTINGS,     element: <SettingsPage /> },

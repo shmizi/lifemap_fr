@@ -13,6 +13,7 @@ import { Calendar, Check, ExternalLink, MapPin, Sparkles, X } from 'lucide-react
 import { format } from 'date-fns'
 import type { ID, Opportunity } from '@/core/types'
 import { OPPORTUNITY_TYPE_LABELS } from '@/core/constants'
+import { safeExternalUrl } from '@/core/utils/safeUrl'
 import { MATCH_THRESHOLD } from '@/engine/discovery/scoreRelevance'
 import { useDiscoveryStore } from '@/store/useDiscoveryStore'
 import { AddToPlanModal } from '@/features/discovery/AddToPlanModal'
@@ -39,6 +40,11 @@ export function OpportunityCard({ opportunity, goalTitleById }: OpportunityCardP
   const removeOpportunity = useDiscoveryStore((s) => s.removeOpportunity)
   const [isBusy, setIsBusy] = useState(false)
   const [isPlanOpen, setIsPlanOpen] = useState(false)
+
+  // Only render the Open link for a safe http(s) URL — a javascript:/data: URL in
+  // an href would execute on click (React does not block it), and an opportunity's
+  // URL is user/provider-supplied. Non-web URLs simply show no Open button.
+  const linkUrl = safeExternalUrl(opportunity.url)
 
   const band = relevanceBand(opportunity.relevanceScore)
   const matchedTitles = opportunity.matchedGoalIds
@@ -126,9 +132,9 @@ export function OpportunityCard({ opportunity, goalTitleById }: OpportunityCardP
       ) : null}
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        {opportunity.url ? (
+        {linkUrl ? (
           <a
-            href={opportunity.url}
+            href={linkUrl}
             target="_blank"
             rel="noreferrer noopener"
             className="inline-flex items-center gap-1.5 rounded-app-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text transition hover:bg-app-border/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"

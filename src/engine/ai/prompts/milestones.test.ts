@@ -10,6 +10,7 @@ const userText = (ctx: MilestoneSuggestionContext): string =>
   buildMilestonePrompt(ctx).messages[0].content
 
 const base: MilestoneSuggestionContext = {
+  goalId: 'goal-1',
   subgoalTitle: 'Get German to B2',
   subgoalDescription: 'Conversational fluency for university.',
   goalTitle: 'Get into RWTH Aachen',

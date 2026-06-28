@@ -22,7 +22,9 @@ export const DB_NAME = 'lifemap';
 // v2 (Phase 6): added the `opportunities` table. Adding a brand-new table is a
 // deliberate schema change — Dexie creates the new object store on upgrade and
 // leaves every existing table untouched, so no data migration is needed.
-export const DB_VERSION = 2;
+// v3 (Phase 9): added `userContext` (single row) + `goalContext` (per goal) for
+// AI personalization — same "new table only" change, existing data untouched.
+export const DB_VERSION = 3;
 
 // Record<string, string> (not `as const`) so it slots cleanly into Dexie's
 // stores() parameter type, which expects a mutable string map.
@@ -57,4 +59,12 @@ export const STORES: Record<string, string> = {
   // is the obvious future addition, but only when a real query consumes it, and
   // it would ride its own DB_VERSION bump.
   opportunities: 'id',
+
+  // Phase 9 — AI personalization context. Both keyed by primary key only; every
+  // other field (closed vocab / arrays / optional free text) is filtered in
+  // memory, where counts are tiny — same philosophy as opportunities/profile.
+  // userContext is a SINGLE row (fixed id, like profile); goalContext is one row
+  // per goal, keyed by goalId so a goal's intake is a direct lookup.
+  userContext: 'id',
+  goalContext: 'goalId',
 };

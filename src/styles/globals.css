@@ -3,34 +3,116 @@
 @tailwind utilities;
 
 @layer base {
-  /* Light mode CSS custom properties (default) */
+  /* ===================================================================
+     "FIELD NOTES" — calm cartographic palette.
+     Light = warm parchment + deep expedition-ink.
+     Each app section carries its own map-pigment accent (see --accent-*).
+     The legacy --color-* names are PRESERVED (only revalued) so every
+     existing component inherits the new look with zero edits.
+     =================================================================== */
   :root {
-    --color-bg:           #F9F7FF;
-    --color-surface:      #FFFFFF;
-    --color-surface-alt:  #F0EDF8;
-    --color-text:         #2D2B4E;
-    --color-text-muted:   #6B6A88;
-    --color-primary:      #7C6FAD;
-    --color-primary-hover:#6B5F9E;
-    --color-secondary:    #68A691;
-    --color-border:       #E2DFF2;
-    --color-warning:      #E8A838;
-    --color-danger:       #E07070;
+    /* Surfaces & text */
+    --color-bg:           #F4EFE3;   /* parchment */
+    --color-surface:      #FBF8F0;   /* paper */
+    --color-surface-alt:  #EAE2CF;   /* aged paper */
+    --color-text:         #1F2D33;   /* expedition ink */
+    --color-text-muted:   #5C6B6E;   /* faded ink */
+    --color-primary:      #2F7E78;   /* route teal (brand) */
+    --color-primary-hover:#266963;
+    --color-secondary:    #C0863A;   /* compass brass */
+    --color-border:       #DCD3BE;   /* contour line */
+    --color-warning:      #C99A2E;   /* amber */
+    --color-danger:       #B5503F;   /* clay red */
+
+    /* Per-section map pigments. One identity per screen. */
+    --accent-dashboard:   #C0863A;   /* compass brass    */
+    --accent-goals:       #C25C3D;   /* summit clay      */
+    --accent-roadmap:     #2F7E78;   /* route teal       */
+    --accent-reviews:     #4C6A92;   /* journal indigo   */
+    --accent-discovery:   #7A5A86;   /* twilight plum    */
+    --accent-settings:    #6B7280;   /* stone            */
+
+    /* Pre-computed solid washes (Tailwind can't alpha a hex-var token, so we
+       ship explicit tints — same reasoning as the Sidebar note). */
+    --accent-dashboard-wash: #F0E6D2;
+    --accent-goals-wash:     #F3DED4;
+    --accent-roadmap-wash:   #DBE9E6;
+    --accent-reviews-wash:   #E0E6F0;
+    --accent-discovery-wash: #E9E0EE;
+    --accent-settings-wash:  #E4E6E9;
+
+    /* Elevation — soft, paper-like. */
+    --shadow-card: 0 1px 2px rgba(31,45,51,.05), 0 10px 28px -18px rgba(31,45,51,.28);
+    --shadow-pop:  0 20px 44px -22px rgba(31,45,51,.50);
+
+    /* Type roles */
+    --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+    --font-sans:    'Inter', system-ui, sans-serif;
+    --font-mono:    'Space Grotesk', ui-monospace, 'SFMono-Regular', monospace;
+
+    /* Faint contour-map texture drawn behind the app content. */
+    --topo-line: rgba(31,45,51,.05);
+
+    /* Glassmorphism panels (dashboard living map). Quite translucent at rest so
+       the map shows through the blur, near-opaque on hover. Alpha is baked in
+       here because Tailwind can't add an alpha channel to the hex-var tokens. */
+    --glass-bg:       rgba(251,248,240,.32);
+    --glass-bg-hover: rgba(251,248,240,.92);
+    --glass-border:   rgba(255,255,255,.65);
+    /* Cartographic terrain. The map area uses its own warm paper, distinct from
+       the app background, plus contour / water / forest pigments. */
+    --map-bg:         #E7DEC9;
+    --map-contour:    rgba(92,82,56,.17);
+    --map-water:      #B6D0D2;
+    --map-water-edge: #93B6B9;
+    --map-forest:     #8A9E73;
+    --map-road:       rgba(95,79,58,.42);
+    --map-label:      rgba(60,72,60,.55);
   }
 
-  /* Dark mode — activated by .dark class on <html> */
+  /* Dark — "night chart / blueprint". */
   .dark {
-    --color-bg:           #1A1828;
-    --color-surface:      #232140;
-    --color-surface-alt:  #2D2A50;
-    --color-text:         #EBEBF5;
-    --color-text-muted:   #9CA3AF;
-    --color-primary:      #9D8FCC;
-    --color-primary-hover:#AFA0D8;
-    --color-secondary:    #7FBFA8;
-    --color-border:       #3B3860;
-    --color-warning:      #F0B848;
-    --color-danger:       #F08080;
+    --color-bg:           #121A1E;
+    --color-surface:      #1B262B;
+    --color-surface-alt:  #243137;
+    --color-text:         #ECE6D6;
+    --color-text-muted:   #90A0A2;
+    --color-primary:      #4FB3AC;
+    --color-primary-hover:#67C5BE;
+    --color-secondary:    #E2A75A;
+    --color-border:       #2E3A40;
+    --color-warning:      #E2A75A;
+    --color-danger:       #D77A5C;
+
+    --accent-dashboard:   #E2A75A;
+    --accent-goals:       #D77A5C;
+    --accent-roadmap:     #4FB3AC;
+    --accent-reviews:     #7C9AC8;
+    --accent-discovery:   #B292C0;
+    --accent-settings:    #9AA3B0;
+
+    --accent-dashboard-wash: #2E2A20;
+    --accent-goals-wash:     #2E211C;
+    --accent-roadmap-wash:   #16302E;
+    --accent-reviews-wash:   #1E2632;
+    --accent-discovery-wash: #272131;
+    --accent-settings-wash:  #23272C;
+
+    --shadow-card: 0 1px 2px rgba(0,0,0,.30), 0 12px 30px -18px rgba(0,0,0,.65);
+    --shadow-pop:  0 22px 48px -20px rgba(0,0,0,.75);
+
+    --topo-line: rgba(236,230,214,.05);
+
+    --glass-bg:       rgba(27,38,43,.42);
+    --glass-bg-hover: rgba(27,38,43,.93);
+    --glass-border:   rgba(255,255,255,.14);
+    --map-bg:         #16211F;
+    --map-contour:    rgba(180,170,140,.13);
+    --map-water:      #284A4E;
+    --map-water-edge: #356065;
+    --map-forest:     #466046;
+    --map-road:       rgba(180,170,150,.26);
+    --map-label:      rgba(180,190,180,.5);
   }
 
   /* Base styles */
@@ -41,9 +123,21 @@
   body {
     background-color: var(--color-bg);
     color: var(--color-text);
-    font-family: 'Inter', system-ui, sans-serif;
+    font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Headings take the display serif by default, so every page title reads as
+     considered rather than generated. Components opt out with font-sans/mono. */
+  h1, h2, h3 {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+  }
+
+  /* Tabular numerals everywhere figures appear in mono. */
+  .font-mono {
+    font-variant-numeric: tabular-nums;
   }
 
   * {
@@ -62,3 +156,26 @@
     }
   }
 }
+
+/* ── Living-map motion ───────────────────────────────────────────────────────
+   Roads draw themselves (normalized via pathLength=1), cities/towns rise in, and
+   the "you are here" marker pulses. Reduced-motion users land on the END state
+   instantly thanks to the global override above (forwards fill + ~0 duration). */
+@keyframes lm-draw {
+  from { stroke-dashoffset: 1; }
+  to   { stroke-dashoffset: 0; }
+}
+@keyframes lm-pop {
+  from { opacity: 0; transform: scale(0.4); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes lm-pulse {
+  0%   { transform: scale(1);   opacity: 0.5; }
+  70%  { transform: scale(2.6); opacity: 0; }
+  100% { opacity: 0; }
+}
+.lm-road  { stroke-dasharray: 1; animation: lm-draw 0.9s ease forwards; }
+.lm-node  { transform-box: fill-box; transform-origin: center;
+            animation: lm-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) backwards; }
+.lm-pulse { transform-box: fill-box; transform-origin: center;
+            animation: lm-pulse 2.3s ease-out infinite; }

@@ -43,6 +43,7 @@ import { isMilestoneComplete } from '@/engine/progress/isMilestoneComplete'
 import { rankTasks, DEFAULT_TOP_N } from '@/engine/priority/rankTasks'
 import { computeActiveSupportCounts } from '@/engine/priority/dependencyBoost'
 import { buildRoadmap } from '@/engine/roadmap/buildRoadmap'
+import { computeLifeMapLayout } from '@/engine/roadmap/computeLifeMapLayout'
 import {
   computeWeeklyReview,
   type WeeklyReviewData,
@@ -65,9 +66,17 @@ import type {
   SubgoalSuggestionContext,
   DailyPlanRequest,
   ScheduledDailyTask,
+  AIUserContext,
+  AIGoalContext,
 } from '@/engine/ai/types'
 import { aiProvider } from '@/services/ai'
-import { DAILY_PLAN_HORIZON } from '@/core/constants'
+import {
+  DAILY_PLAN_HORIZON,
+  LIFE_SITUATION_OPTIONS,
+  TIME_OF_DAY_OPTIONS,
+  WORK_RHYTHM_OPTIONS,
+  WEEKDAY_LABELS,
+} from '@/core/constants'
 import {
   getAllGoals,
   createGoal,
@@ -96,6 +105,10 @@ import {
   getTasksByGoalId,
   getAllTasks,
   getDependenciesByType,
+  deleteGoalContext,
+  getUserContext,
+  getGoalContext,
+  getProfile,
 } from '@/database/repositories'
 
 // User-facing copy for the store's NON-FATAL failure states. Kept calm and
@@ -188,10 +201,93 @@ export interface RoadmapView {
   cyclic: boolean
 }
 
+// ── Life-map view-model (the dashboard "living map") ─────────────────────────
+// The whole life as ONE map: every goal is a CITY, every subgoal a TOWN,
+// positioned by the pure layout engine (computeLifeMapLayout) and joined here to
+// live titles, progress and state. Roads are soft subgoal dependencies (kept
+// even across goals — the interconnection is the point); membership links tie a
+// town to its city. Unlike currentRoadmap (one goal), this is the single
+// cross-goal map the dashboard shows; like it, it's a read-only cached slot the
+// store assembles from engine facts + repository data.
+export type LifeMapNodeState = 'done' | 'active' | 'here' | 'todo'
+export interface LifeMapNode {
+  id: ID
+  kind: 'city' | 'town'
+  goalId: ID
+  x: number
+  y: number
+  label: string
+  sublabel?: string
+  // Raw target date (ISO), kept alongside the formatted sublabel so the Upcoming
+  // panel can sort/filter by it. Undefined when the goal/subgoal has no deadline.
+  date?: string
+  state: LifeMapNodeState
+  percent: number
+}
+export interface LifeMapLink {
+  id: string
+  source: ID
+  target: ID
+  kind: 'dep' | 'member'
+  // A "paved" road: its source town is complete. Drives the solid-vs-dashed look.
+  done: boolean
+}
+export interface LifeMapView {
+  nodes: LifeMapNode[]
+  links: LifeMapLink[]
+  width: number
+  height: number
+}
+
 // A goal paired with all its tasks — the shared shape gatherGoalsWithTasks
 // produces and the two cross-goal refreshers (progress/health and top-priority)
 // both consume. Named so loadDashboard can fetch it once and pass it to both.
 type GoalWithTasks = { goal: Goal; tasks: Task[] }
+
+// ── AI personalization context loaders (Phase 9) ─────────────────────────────
+// Map the persisted context (UserContext / GoalContext / profile) into the
+// AI-facing shapes the prompt builders consume, resolving stored enum values to
+// human labels. Kept here (store side) because they read the DB via repositories;
+// the engine stays pure and just receives plain strings. Both return undefined
+// when nothing is captured, so a prompt simply omits that context block.
+const labelOf = <T extends string>(
+  options: ReadonlyArray<{ value: T; label: string }>,
+  value: T | undefined,
+): string | undefined =>
+  value === undefined
+    ? undefined
+    : (options.find((o) => o.value === value)?.label ?? value)
+
+const loadAIUserContext = async (): Promise<AIUserContext | undefined> => {
+  const [ctx, profile] = await Promise.all([getUserContext(), getProfile()])
+  if (!ctx && !profile) return undefined
+  const result: AIUserContext = {}
+  if (ctx) {
+    result.situation = labelOf(LIFE_SITUATION_OPTIONS, ctx.situation)
+    result.situationDetail = ctx.situationDetail
+    result.lightDays = ctx.lightDays
+      .map((i) => WEEKDAY_LABELS[i])
+      .filter((l): l is string => Boolean(l))
+    result.bestTimeOfDay = labelOf(TIME_OF_DAY_OPTIONS, ctx.bestTimeOfDay)
+    result.workRhythm = labelOf(WORK_RHYTHM_OPTIONS, ctx.workRhythm)
+    result.about = ctx.about
+  }
+  if (profile) result.availableHoursPerDay = profile.availableHoursPerDay
+  return result
+}
+
+const loadAIGoalContext = async (
+  goalId: ID,
+): Promise<AIGoalContext | undefined> => {
+  const ctx = await getGoalContext(goalId)
+  if (!ctx) return undefined
+  return {
+    startingLevel: ctx.startingLevel,
+    priorExperience: ctx.priorExperience,
+    deadlineHardness: ctx.deadlineHardness,
+    motivation: ctx.motivation,
+  }
+}
 
 interface GoalState {
   // --- goal list ---
@@ -291,6 +387,13 @@ interface GoalState {
   currentRoadmap: RoadmapView | null
   isLoadingRoadmap: boolean
   loadRoadmap: (goalId: ID) => Promise<void>
+
+  // --- life map (the dashboard's cross-goal "living map"; via useLifeMap) ---
+  // Single cached slot for the whole-life map (all goals at once). Read-only;
+  // rebuilt on dashboard mount. Editing still happens on Goal Detail.
+  lifeMap: LifeMapView | null
+  isLoadingLifeMap: boolean
+  loadLifeMap: () => Promise<void>
 
   // --- AI assistance (Phase 5) ---
   // Ask the AI provider for milestone suggestions for one subgoal. READ-ONLY: it
@@ -656,6 +759,10 @@ export const useGoalStore = create<GoalState>()((set, get) => {
     // repository transaction. Nothing extra to do here.
     removeGoal: async (id) => {
       await deleteGoal(id)
+      // Phase 9: the goal's AI-intake context lives in a separate table, so the
+      // goalRepository cascade can't reach it — remove it here so a goalContext
+      // row never outlives the goal it describes. Idempotent (no row = no-op).
+      await deleteGoalContext(id)
       await settleRefreshes([refreshGoalsAndProgress()])
     },
 
@@ -987,13 +1094,146 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       }
     },
 
+    // --- life map ---
+    lifeMap: null,
+    isLoadingLifeMap: false,
+
+    // Assemble the dashboard's cross-goal "living map". The pure layout engine
+    // (computeLifeMapLayout) owns the geometry; this gathers the live data —
+    // every goal, its subgoals, the subgoal dependency graph, and each
+    // node's completion — and joins titles/progress/state onto the laid-out
+    // nodes. Read-only, single-slot cache; mirrors loadRoadmap but spans ALL
+    // goals because the dashboard map is the one place the whole life is shown.
+    loadLifeMap: async () => {
+      set({ isLoadingLifeMap: true })
+      try {
+        const goals = await getAllGoals()
+        const [subgoalsPerGoal, tasksPerGoal, subgoalEdges] = await Promise.all([
+          Promise.all(goals.map((g) => getSubgoalsByGoalId(g.id))),
+          Promise.all(goals.map((g) => getTasksByGoalId(g.id))),
+          getDependenciesByType('subgoal'),
+        ])
+
+        // Index live data and per-node completion. computeSubgoalProgress /
+        // computeGoalProgress are the same engine fns the cards use, so the map's
+        // state never disagrees with the rest of the app.
+        const subgoalsByGoal: Record<ID, ID[]> = {}
+        const subgoalById = new Map<ID, Subgoal>()
+        const subgoalPercent = new Map<ID, number>()
+        const goalPercent = new Map<ID, number>()
+        goals.forEach((g, i) => {
+          const subs = subgoalsPerGoal[i]
+          const tasks = tasksPerGoal[i]
+          subgoalsByGoal[g.id] = subs.map((s) => s.id)
+          goalPercent.set(g.id, computeGoalProgress(tasks).percent)
+          for (const s of subs) {
+            subgoalById.set(s.id, s)
+            subgoalPercent.set(
+              s.id,
+              computeSubgoalProgress(tasks.filter((t) => t.subgoalId === s.id))
+                .percent,
+            )
+          }
+        })
+
+        const layout = computeLifeMapLayout(
+          goals.map((g) => g.id),
+          subgoalsByGoal,
+          subgoalEdges,
+        )
+
+        const goalById = new Map(goals.map((g) => [g.id, g]))
+        const townDone = (id: ID): boolean => {
+          const s = subgoalById.get(id)
+          return s?.status === 'completed' || (subgoalPercent.get(id) ?? 0) >= 100
+        }
+
+        // The single "you are here" town: the most-progressed still-unfinished
+        // subgoal, biased toward the focused goal if one is selected. Marks
+        // current momentum without overstating it (omitted if nothing's underway).
+        const focusGoalId = get().selectedGoalId
+        let hereId: ID | null = null
+        let hereScore = -1
+        for (const [id, s] of subgoalById) {
+          if (townDone(id)) continue
+          const pct = subgoalPercent.get(id) ?? 0
+          if (pct <= 0) continue
+          const score = (focusGoalId && s.goalId === focusGoalId ? 1000 : 0) + pct
+          if (score > hereScore) {
+            hereScore = score
+            hereId = id
+          }
+        }
+
+        const nodes: LifeMapNode[] = layout.nodes.map((nd) => {
+          if (nd.kind === 'city') {
+            const goal = goalById.get(nd.id)
+            const pct = goalPercent.get(nd.id) ?? 0
+            const done = goal?.status === 'completed' || pct >= 100
+            return {
+              ...nd,
+              label: goal?.title ?? 'Goal',
+              sublabel: goal?.targetDate
+                ? format(new Date(goal.targetDate), 'MMM yyyy')
+                : undefined,
+              date: goal?.targetDate,
+              state: done ? 'done' : pct > 0 ? 'active' : 'todo',
+              percent: pct,
+            }
+          }
+          const sub = subgoalById.get(nd.id)
+          const pct = subgoalPercent.get(nd.id) ?? 0
+          const state: LifeMapNodeState = townDone(nd.id)
+            ? 'done'
+            : nd.id === hereId
+              ? 'here'
+              : pct > 0
+                ? 'active'
+                : 'todo'
+          return {
+            ...nd,
+            label: sub?.title ?? 'Subgoal',
+            sublabel: sub?.targetDate
+              ? format(new Date(sub.targetDate), 'MMM yyyy')
+              : undefined,
+            date: sub?.targetDate,
+            state,
+            percent: pct,
+          }
+        })
+
+        const links: LifeMapLink[] = layout.links.map((l) => ({
+          ...l,
+          done: townDone(l.source),
+        }))
+
+        set({
+          lifeMap: { nodes, links, width: layout.width, height: layout.height },
+          error: null,
+        })
+      } catch {
+        set({ error: LOAD_ERROR_MESSAGE })
+      } finally {
+        set({ isLoadingLifeMap: false })
+      }
+    },
+
     // --- AI assistance ---
     // Thin orchestration: build the prompt (pure), ask the provider (the only
     // thing that "calls out"), parse the reply (pure, never throws). No store
     // state is cached — the caller holds the returned suggestions while the user
     // accepts/edits/rejects them. A provider rejection bubbles up to the caller.
     suggestMilestones: async (context) => {
-      const response = await aiProvider.complete(buildMilestonePrompt(context))
+      // Phase 9: enrich the prompt with who the user is and where they stand on
+      // the parent goal, so suggestions are tailored. Fetched store-side; the
+      // engine prompt builder stays pure.
+      const [userContext, goalContext] = await Promise.all([
+        loadAIUserContext(),
+        loadAIGoalContext(context.goalId),
+      ])
+      const response = await aiProvider.complete(
+        buildMilestonePrompt({ ...context, userContext, goalContext }),
+      )
       return parseMilestoneSuggestions(response)
     },
 
@@ -1001,7 +1241,13 @@ export const useGoalStore = create<GoalState>()((set, get) => {
     // thin orchestration (pure prompt -> provider -> pure parser), same
     // propagate-on-failure contract.
     suggestSubgoals: async (context) => {
-      const response = await aiProvider.complete(buildSubgoalPrompt(context))
+      const [userContext, goalContext] = await Promise.all([
+        loadAIUserContext(),
+        loadAIGoalContext(context.goalId),
+      ])
+      const response = await aiProvider.complete(
+        buildSubgoalPrompt({ ...context, userContext, goalContext }),
+      )
       return parseSubgoalSuggestions(response)
     },
 
@@ -1030,6 +1276,12 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       )
       if (days <= 0) return [] // already planned through the deadline
 
+      // Phase 9: tailor the plan to the person + goal. Fetched only after the
+      // early-out above, so a no-op regenerate does no extra reads.
+      const [userContext, goalContext] = await Promise.all([
+        loadAIUserContext(),
+        loadAIGoalContext(request.goalId),
+      ])
       const response = await aiProvider.complete(
         buildDailyPlanPrompt({
           subgoalTitle: request.subgoalTitle,
@@ -1037,6 +1289,8 @@ export const useGoalStore = create<GoalState>()((set, get) => {
           goalTitle: request.goalTitle,
           dailyMinutes: request.dailyMinutes,
           days,
+          userContext,
+          goalContext,
         }),
       )
       const sessions = parseSuggestionList(response, days)

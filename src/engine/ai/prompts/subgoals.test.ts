@@ -9,6 +9,7 @@ const userText = (ctx: SubgoalSuggestionContext): string =>
   buildSubgoalPrompt(ctx).messages[0].content
 
 const base: SubgoalSuggestionContext = {
+  goalId: 'goal-1',
   goalTitle: 'Get into RWTH Aachen',
   goalDescription: 'Admission to the CS masters programme.',
   goalCategory: 'Education',

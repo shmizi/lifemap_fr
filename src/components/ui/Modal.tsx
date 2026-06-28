@@ -50,7 +50,12 @@ export function Modal({
             role="dialog"
             aria-modal="true"
             aria-label={title}
-            className={`relative w-full ${maxWidth} rounded-app-lg border border-app-border bg-app-surface p-6 shadow-xl`}
+            // Cap the panel height and let its body scroll, so a tall form (e.g.
+            // a goal with its tailoring intake) never overflows the viewport with
+            // no way to reach the buttons. The header stays pinned; only the body
+            // scrolls. flex-col + min-h-0 on the body is what makes the inner
+            // overflow actually scroll inside a flex container.
+            className={`relative flex max-h-[88vh] w-full flex-col ${maxWidth} rounded-app-lg border border-app-border bg-app-surface p-6 shadow-xl`}
             initial={{ opacity: 0, scale: 0.97, y: 8 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.97, y: 8 }}
@@ -59,7 +64,7 @@ export function Modal({
               if (e.key === 'Escape') onClose()
             }}
           >
-            <div className="flex items-center justify-between">
+            <div className="flex shrink-0 items-center justify-between">
               <h2 className="text-lg font-semibold text-app-text">{title}</h2>
               <button
                 type="button"
@@ -71,7 +76,10 @@ export function Modal({
               </button>
             </div>
 
-            {children}
+            {/* -mr-2 pr-2 insets the scrollbar slightly from the panel edge. */}
+            <div className="-mr-2 min-h-0 flex-1 overflow-y-auto pr-2">
+              {children}
+            </div>
           </motion.div>
         </motion.div>
       ) : null}

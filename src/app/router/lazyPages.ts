@@ -20,9 +20,6 @@ export const GoalsPage = lazy(() =>
 export const GoalDetailPage = lazy(() =>
   import('@/pages/GoalDetailPage').then((m) => ({ default: m.GoalDetailPage })),
 )
-export const RoadmapPage = lazy(() =>
-  import('@/pages/RoadmapPage').then((m) => ({ default: m.RoadmapPage })),
-)
 export const WeeklyReviewPage = lazy(() =>
   import('@/pages/WeeklyReviewPage').then((m) => ({
     default: m.WeeklyReviewPage,

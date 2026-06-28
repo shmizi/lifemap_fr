@@ -9,17 +9,30 @@
 // array the shared parseSuggestionList primitive already handles.
 
 import type { AIRequest, DailyPlanContext } from '@/engine/ai/types'
+import {
+  LIFEMAP_SYSTEM_PROMPT,
+  renderUserContextLines,
+  renderGoalContextLines,
+} from '@/engine/ai/prompts/system'
 
 // The bounded planning window (DAILY_PLAN_HORIZON) lives in core/constants so the
 // UI can read it without importing engine/; the caller passes the already-bounded
 // day count in via context.days, so this builder needs only that.
 
 export function buildDailyPlanPrompt(context: DailyPlanContext): AIRequest {
-  const { subgoalTitle, subgoalDescription, goalTitle, dailyMinutes, days } =
-    context
+  const {
+    subgoalTitle,
+    subgoalDescription,
+    goalTitle,
+    dailyMinutes,
+    days,
+    userContext,
+    goalContext,
+  } = context
 
   const SYSTEM_INSTRUCTION = [
-    'You design a short daily practice plan for a personal subgoal.',
+    LIFEMAP_SYSTEM_PROMPT,
+    'For this request, design a short daily practice plan for a personal subgoal.',
     `Produce an ordered list of up to ${days} daily sessions, one per day, that build on each other.`,
     `Each session should be about ${dailyMinutes} minutes of focused work.`,
     'Each needs a short title and one concise sentence on what to do that day.',
@@ -36,6 +49,9 @@ export function buildDailyPlanPrompt(context: DailyPlanContext): AIRequest {
   if (subgoalDescription.trim().length > 0) {
     lines.push(`Subgoal description: ${subgoalDescription.trim()}`)
   }
+  // Personalization: who this is for and where they stand on the goal.
+  lines.push(...renderUserContextLines(userContext))
+  lines.push(...renderGoalContextLines(goalContext))
   lines.push('Design the daily plan.')
 
   return {

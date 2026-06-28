@@ -184,6 +184,7 @@ export function GoalDetailPage() {
               <SubgoalSection
                 key={subgoalTree.subgoal.id}
                 data={subgoalTree}
+                goalId={goal.id}
                 goalTitle={goal.title}
                 allSubgoals={allSubgoals}
                 subgoalDependencies={subgoalDependencies}
@@ -205,6 +206,7 @@ export function GoalDetailPage() {
         open={isSuggestSubgoalsOpen}
         onClose={() => setIsSuggestSubgoalsOpen(false)}
         context={{
+          goalId: goal.id,
           goalTitle: goal.title,
           goalDescription: goal.description,
           goalCategory: categoryLabel(goal.category),
