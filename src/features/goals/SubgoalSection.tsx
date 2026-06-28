@@ -33,6 +33,9 @@ import { TaskRow } from '@/features/goals/TaskRow'
 
 interface SubgoalSectionProps {
   data: SubgoalTree
+  // The parent goal's id — so the AI suggesters can fetch that goal's intake
+  // context (Phase 9). Passed from the page.
+  goalId: ID
   // The parent goal's title — context the AI milestone suggester needs (the
   // subgoal alone is ambiguous without the goal it serves). Passed from the page.
   goalTitle: string
@@ -45,6 +48,7 @@ interface SubgoalSectionProps {
 
 export function SubgoalSection({
   data,
+  goalId,
   goalTitle,
   allSubgoals,
   subgoalDependencies,
@@ -271,6 +275,7 @@ export function SubgoalSection({
         open={isSuggestOpen}
         onClose={() => setIsSuggestOpen(false)}
         context={{
+          goalId,
           goalTitle,
           subgoalTitle: subgoal.title,
           subgoalDescription: subgoal.description,
@@ -285,6 +290,7 @@ export function SubgoalSection({
           onClose={() => setIsDailyPlanOpen(false)}
           request={{
             subgoalId: subgoal.id,
+            goalId,
             subgoalTitle: subgoal.title,
             subgoalDescription: subgoal.description,
             goalTitle,

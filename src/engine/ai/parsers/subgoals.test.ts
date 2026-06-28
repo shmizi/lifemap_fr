@@ -40,6 +40,7 @@ describe('MockAI <-> subgoal parser round trip', () => {
     // A subgoal prompt names only a "Goal:" line; the mock must return
     // subgoal-shaped items personalised with the goal title.
     const request = buildSubgoalPrompt({
+      goalId: 'goal-1',
       goalTitle: 'Get into RWTH Aachen',
       goalDescription: '',
       goalCategory: 'Education',

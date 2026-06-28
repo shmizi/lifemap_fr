@@ -20,7 +20,7 @@
 // A provider swap (MockAI -> Anthropic in Phase 6) changes ONE service file and
 // nothing here, in the prompts, the parsers, or the store.
 
-import type { ID, ISODate, OpportunityType } from '@/core/types'
+import type { ID, ISODate, OpportunityType, DeadlineHardness } from '@/core/types'
 
 // ── Provider-agnostic transport ──────────────────────────────────────────────
 
@@ -61,6 +61,42 @@ export interface AISuggestion {
   description?: string
 }
 
+// ── Personalization context (Phase 9) ────────────────────────────────────────
+// The AI-facing view of who the user is and where they stand on a goal — what
+// makes two people with the SAME goal get DIFFERENT plans. These are PLAIN
+// DISPLAY STRINGS (human labels, not enums), so the pure prompt builders stay
+// decoupled from persistence shapes — the EXCEPTION is deadlineHardness, which a
+// builder branches on (a hard deadline changes the pacing instruction). The store
+// maps the persisted UserContext / GoalContext (+ profile) into these before
+// building a prompt; the renderers live in engine/ai/prompts/system.ts. Every
+// feature's context can optionally carry them, so any prompt can be tailored.
+export interface AIUserContext {
+  // e.g. "Student", optionally with free detail ("final-year CS, part-time job").
+  situation?: string
+  situationDetail?: string
+  // Weekday labels with little/no capacity, e.g. ["Sat", "Sun"].
+  lightDays?: string[]
+  // e.g. "Mornings".
+  bestTimeOfDay?: string
+  // e.g. "Structured and steady".
+  workRhythm?: string
+  // Free text the user wrote about themselves.
+  about?: string
+  // From the profile — how many focused hours a typical day affords.
+  availableHoursPerDay?: number
+}
+
+export interface AIGoalContext {
+  // Where the user is starting from on this goal (current level).
+  startingLevel?: string
+  // What they have already done toward it.
+  priorExperience?: string
+  // Whether the target date can move — the builder front-loads a hard deadline.
+  deadlineHardness?: DeadlineHardness
+  // Why it matters to them.
+  motivation?: string
+}
+
 // ── Feature: milestone suggestions ───────────────────────────────────────────
 // The first AI slice: when a subgoal is created, suggest a few milestone
 // checkpoints the user can accept / edit / reject (see STRICT DATA HIERARCHY).
@@ -70,12 +106,18 @@ export interface AISuggestion {
 // decoupled from persistence shapes and is trivial to unit-test on fixtures.
 // The store assembles this from the loaded goal tree it already holds.
 export interface MilestoneSuggestionContext {
+  // The parent goal's id — the store uses it to fetch that goal's intake context;
+  // the prompt builder ignores it (it is not rendered into the prompt).
+  goalId: ID
   subgoalTitle: string
   subgoalDescription: string
   goalTitle: string
   // Titles of milestones the subgoal already has, so the model can avoid
   // proposing duplicates. Optional / may be empty for a fresh subgoal.
   existingMilestoneTitles?: string[]
+  // Personalization (Phase 9) — filled by the store, not the UI.
+  userContext?: AIUserContext
+  goalContext?: AIGoalContext
 }
 
 // A suggested checkpoint. The store supplies id/order/status/aiSuggested when an
@@ -89,6 +131,9 @@ export type MilestoneSuggestion = AISuggestion
 
 // Everything the prompt builder needs to describe ONE goal to the model.
 export interface SubgoalSuggestionContext {
+  // The goal's id — the store uses it to fetch this goal's intake context; the
+  // prompt builder ignores it (not rendered into the prompt).
+  goalId: ID
   goalTitle: string
   goalDescription: string
   // Human-readable category label (e.g. "Education") — light steer for the kind
@@ -96,6 +141,9 @@ export interface SubgoalSuggestionContext {
   goalCategory: string
   // Titles of subgoals the goal already has, so the model avoids duplicates.
   existingSubgoalTitles?: string[]
+  // Personalization (Phase 9) — filled by the store, not the UI.
+  userContext?: AIUserContext
+  goalContext?: AIGoalContext
 }
 
 export type SubgoalSuggestion = AISuggestion
@@ -113,6 +161,8 @@ export type SubgoalSuggestion = AISuggestion
 // engine's job).
 export interface DailyPlanRequest {
   subgoalId: ID
+  // The parent goal's id — the store uses it to fetch that goal's intake context.
+  goalId: ID
   subgoalTitle: string
   subgoalDescription: string
   goalTitle: string
@@ -133,6 +183,9 @@ export interface DailyPlanContext {
   // How many days to plan (bounded by the store: horizon, narrowed to the days
   // remaining from the start date to any deadline).
   days: number
+  // Personalization (Phase 9) — filled by the store, not the UI.
+  userContext?: AIUserContext
+  goalContext?: AIGoalContext
 }
 
 // One scheduled daily task, ready for the existing addTask path. scheduledDate is

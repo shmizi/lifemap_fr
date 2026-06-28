@@ -3,7 +3,7 @@
 // which page is open: the sidebar toggle (left) and the theme toggle (right).
 // Both read from / write to useUIStore so state stays centralized.
 
-import { Menu, Sun, Moon } from 'lucide-react'
+import { SidebarSimple, Sun, Moon } from '@phosphor-icons/react'
 import { useUIStore } from '@/store/useUIStore'
 import { APP_NAME } from '@/core/constants'
 import { LAYOUT } from '@/core/constants/layout'
@@ -27,9 +27,9 @@ export function Topbar() {
           aria-label="Toggle sidebar"
           className="flex h-9 w-9 items-center justify-center rounded-app text-app-text-muted transition-colors duration-150 hover:bg-app-surface-alt hover:text-app-text"
         >
-          <Menu size={20} aria-hidden />
+          <SidebarSimple size={20} weight="regular" aria-hidden />
         </button>
-        <span className="text-base font-semibold tracking-tight text-app-text">
+        <span className="font-display text-base font-semibold tracking-tight text-app-text">
           {APP_NAME}
         </span>
       </div>
@@ -40,7 +40,9 @@ export function Topbar() {
         aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
         className="flex h-9 w-9 items-center justify-center rounded-app text-app-text-muted transition-colors duration-150 hover:bg-app-surface-alt hover:text-app-text"
       >
-        {isDark ? <Sun size={20} aria-hidden /> : <Moon size={20} aria-hidden />}
+        {isDark
+          ? <Sun size={20} weight="duotone" aria-hidden />
+          : <Moon size={20} weight="duotone" aria-hidden />}
       </button>
     </header>
   )

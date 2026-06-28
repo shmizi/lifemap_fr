@@ -12,6 +12,11 @@
 // that drops them is caught without any network call.
 
 import type { AIRequest, MilestoneSuggestionContext } from '@/engine/ai/types'
+import {
+  LIFEMAP_SYSTEM_PROMPT,
+  renderUserContextLines,
+  renderGoalContextLines,
+} from '@/engine/ai/prompts/system'
 
 // How many checkpoints we ask the model to produce. Matches the parser's cap
 // (see MAX_MILESTONE_SUGGESTIONS there) so prompt and parser agree on volume —
@@ -19,10 +24,11 @@ import type { AIRequest, MilestoneSuggestionContext } from '@/engine/ai/types'
 // (tasks live one level below). Exported so the parser and tests share one value.
 export const SUGGESTED_MILESTONE_COUNT = 5
 
-// The model's role + hard rules. Kept terse and product-shaped: milestones are
+// The shared planning philosophy plus this feature's contract: milestones are
 // ordered checkpoints, NOT tasks, and the response must be machine-parseable.
 const SYSTEM_INSTRUCTION = [
-  'You help break a personal subgoal into a few meaningful milestones.',
+  LIFEMAP_SYSTEM_PROMPT,
+  'For this request, break a personal subgoal into a few meaningful milestones.',
   'A milestone is an ordered checkpoint that marks real progress, not a single task.',
   `Suggest at most ${SUGGESTED_MILESTONE_COUNT} milestones, in the order they should be reached.`,
   'Each needs a short title and one concise sentence describing what marks it done.',
@@ -33,8 +39,14 @@ const SYSTEM_INSTRUCTION = [
 export function buildMilestonePrompt(
   context: MilestoneSuggestionContext,
 ): AIRequest {
-  const { subgoalTitle, subgoalDescription, goalTitle, existingMilestoneTitles } =
-    context
+  const {
+    subgoalTitle,
+    subgoalDescription,
+    goalTitle,
+    existingMilestoneTitles,
+    userContext,
+    goalContext,
+  } = context
 
   // Lines are assembled conditionally so empty optional fields never inject a
   // dangling "Description:" with nothing after it (which would mislead the model).
@@ -45,6 +57,9 @@ export function buildMilestonePrompt(
   if (subgoalDescription.trim().length > 0) {
     lines.push(`Subgoal description: ${subgoalDescription.trim()}`)
   }
+  // Personalization: who this is for and where they stand on the parent goal.
+  lines.push(...renderUserContextLines(userContext))
+  lines.push(...renderGoalContextLines(goalContext))
   if (existingMilestoneTitles && existingMilestoneTitles.length > 0) {
     // Steer away from duplicating checkpoints the subgoal already has.
     lines.push(

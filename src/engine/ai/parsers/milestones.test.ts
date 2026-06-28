@@ -79,6 +79,7 @@ describe('MockAI <-> parser round trip', () => {
   it('parses MockAI output into non-empty suggestions', async () => {
     // Proves prompt, mock, and parser agree on the wire format end-to-end.
     const request = buildMilestonePrompt({
+      goalId: 'goal-1',
       subgoalTitle: 'Get German to B2',
       subgoalDescription: '',
       goalTitle: 'Get into RWTH Aachen',

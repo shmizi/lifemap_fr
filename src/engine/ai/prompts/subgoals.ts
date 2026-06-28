@@ -8,13 +8,22 @@
 // shared parseSuggestionList primitive via parsers/subgoals.ts.
 
 import type { AIRequest, SubgoalSuggestionContext } from '@/engine/ai/types'
+import {
+  LIFEMAP_SYSTEM_PROMPT,
+  renderUserContextLines,
+  renderGoalContextLines,
+} from '@/engine/ai/prompts/system'
 
 // How many subgoals we ask for. Kept small: a goal breaks into a handful of
 // major parts, not a long list. Exported so the parser cap and tests share it.
 export const SUGGESTED_SUBGOAL_COUNT = 5
 
+// The shared planning philosophy (LIFEMAP_SYSTEM_PROMPT) plus this feature's
+// output contract. Both are needed: the philosophy so suggestions are tailored
+// and well-shaped, the contract so the reply is machine-parseable.
 const SYSTEM_INSTRUCTION = [
-  'You help break a long-term personal goal into its major subgoals.',
+  LIFEMAP_SYSTEM_PROMPT,
+  'For this request, break a long-term personal goal into its major subgoals.',
   'A subgoal is a significant part the goal depends on, not a single task or milestone.',
   `Suggest at most ${SUGGESTED_SUBGOAL_COUNT} subgoals that together cover the goal.`,
   'Each needs a short title and one concise sentence describing what it involves.',
@@ -23,8 +32,14 @@ const SYSTEM_INSTRUCTION = [
 ].join(' ')
 
 export function buildSubgoalPrompt(context: SubgoalSuggestionContext): AIRequest {
-  const { goalTitle, goalDescription, goalCategory, existingSubgoalTitles } =
-    context
+  const {
+    goalTitle,
+    goalDescription,
+    goalCategory,
+    existingSubgoalTitles,
+    userContext,
+    goalContext,
+  } = context
 
   const lines: string[] = [
     `Goal: ${goalTitle}`,
@@ -33,6 +48,9 @@ export function buildSubgoalPrompt(context: SubgoalSuggestionContext): AIRequest
   if (goalDescription.trim().length > 0) {
     lines.push(`Goal description: ${goalDescription.trim()}`)
   }
+  // Personalization: who this is for and where they stand on the goal.
+  lines.push(...renderUserContextLines(userContext))
+  lines.push(...renderGoalContextLines(goalContext))
   if (existingSubgoalTitles && existingSubgoalTitles.length > 0) {
     lines.push(
       `It already has these subgoals, do not repeat them: ${existingSubgoalTitles.join('; ')}`,

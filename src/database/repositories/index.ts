@@ -10,4 +10,5 @@ export * from './hierarchyRepository';
 export * from './dependencyRepository';
 export * from './opportunityRepository';
 export * from './profileRepository';
+export * from './contextRepository';
 export { snapshotRepository } from './snapshotRepository';
