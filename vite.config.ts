@@ -1,22 +1,30 @@
-import { defineConfig, loadEnv, type Plugin, type Connect } from 'vite'
+import {
+  defineConfig,
+  loadEnv,
+  type Plugin,
+  type Connect,
+  type ViteDevServer,
+  type PreviewServer,
+} from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
-// ── Local-dev AI proxy (Phase 9, step 3) ─────────────────────────────────────
-// Keeps ANTHROPIC_API_KEY SERVER-SIDE: the key is read here, in the Node config
-// process, and never reaches the browser bundle (it is not VITE_-prefixed, so
-// import.meta.env can't see it). The browser calls the same-origin /api/ai path
-// (AnthropicProvider); this middleware attaches the key and forwards to Anthropic.
-// apply:'serve' scopes the plugin to `vite` (dev) only — a production build ships
-// nothing of this; go-live re-implements /api/ai as a Vercel edge function.
+// ── AI proxy (Phase 9) ───────────────────────────────────────────────────────
+// Keeps the Anthropic API key SERVER-SIDE: the key is read in the Node process
+// (never the browser bundle — it's not VITE_-prefixed). The browser calls the
+// same-origin /api/ai path (AnthropicProvider); this middleware attaches the key
+// and forwards to Anthropic.
+//
+// It runs in BOTH `vite` (dev) and `vite preview` (the production-build server we
+// run on Cloud Run), via configureServer + configurePreviewServer. At runtime the
+// key/model come from process.env (Cloud Run env vars); for local dev they fall
+// back to loadEnv's .env values. Either way the key never reaches the client.
 
-// Shape the app sends (mirrors engine/ai AIRequest) and the Anthropic reply.
 interface ProxyRequestBody {
   system?: string
   messages?: unknown
   maxTokens?: number
-  // 'quality' | 'fast' — see AIModelTier. Absent is treated as 'quality'.
   tier?: string
 }
 interface AnthropicTextBlock {
@@ -28,18 +36,20 @@ interface AnthropicMessagesResponse {
   error?: { message?: string }
 }
 
-// Per-tier model defaults: quality work (roadmap decomposition) on Sonnet,
-// routine high-volume work (daily plans, extraction) on Haiku. Each is
-// overridable via env; ANTHROPIC_MODEL (if set) forces ONE model for every tier.
 const DEFAULT_MODEL_QUALITY = 'claude-sonnet-4-6'
 const DEFAULT_MODEL_FAST = 'claude-haiku-4-5-20251001'
 const DEFAULT_MAX_TOKENS = 4096
 
-// Resolve the concrete model for a request's tier, honouring env overrides.
+// process.env (Cloud Run / shell) takes precedence; loadEnv (.env) is the fallback.
+function readEnv(key: string, env: Record<string, string>): string | undefined {
+  return process.env[key] ?? env[key]
+}
+
 function resolveModel(tier: string | undefined, env: Record<string, string>): string {
-  if (env.ANTHROPIC_MODEL) return env.ANTHROPIC_MODEL // global single-model override
-  if (tier === 'fast') return env.ANTHROPIC_MODEL_FAST || DEFAULT_MODEL_FAST
-  return env.ANTHROPIC_MODEL_QUALITY || DEFAULT_MODEL_QUALITY
+  const forced = readEnv('ANTHROPIC_MODEL', env)
+  if (forced) return forced
+  if (tier === 'fast') return readEnv('ANTHROPIC_MODEL_FAST', env) || DEFAULT_MODEL_FAST
+  return readEnv('ANTHROPIC_MODEL_QUALITY', env) || DEFAULT_MODEL_QUALITY
 }
 
 function readBody(req: IncomingMessage): Promise<string> {
@@ -64,11 +74,11 @@ async function handleAiRequest(
   res: ServerResponse,
   env: Record<string, string>,
 ): Promise<void> {
-  const apiKey = env.ANTHROPIC_API_KEY
+  const apiKey = readEnv('ANTHROPIC_API_KEY', env)
   if (!apiKey) {
     sendJson(res, 500, {
       error:
-        'ANTHROPIC_API_KEY is not set. Add it to .env (it stays server-side, never bundled).',
+        'ANTHROPIC_API_KEY is not set. Add it to .env (local) or the Cloud Run service env (deployed).',
     })
     return
   }
@@ -96,7 +106,6 @@ async function handleAiRequest(
       })
       return
     }
-    // Concatenate the text blocks — the parsers tolerate any surrounding prose.
     const text = (data.content ?? [])
       .filter((b): b is AnthropicTextBlock => b.type === 'text' && typeof b.text === 'string')
       .map((b) => b.text as string)
@@ -109,28 +118,39 @@ async function handleAiRequest(
   }
 }
 
+function registerAiProxy(
+  middlewares: Connect.Server,
+  env: Record<string, string>,
+): void {
+  middlewares.use(
+    '/api/ai',
+    (req: Connect.IncomingMessage, res: ServerResponse, next: Connect.NextFunction) => {
+      if (req.method !== 'POST') {
+        next()
+        return
+      }
+      void handleAiRequest(req, res, env)
+    },
+  )
+}
+
 function aiProxyPlugin(env: Record<string, string>): Plugin {
   return {
     name: 'lifemap-ai-proxy',
-    apply: 'serve',
-    configureServer(server) {
-      server.middlewares.use(
-        '/api/ai',
-        (req: Connect.IncomingMessage, res: ServerResponse, next: Connect.NextFunction) => {
-          if (req.method !== 'POST') {
-            next()
-            return
-          }
-          void handleAiRequest(req, res, env)
-        },
-      )
+    // Dev server (`vite`).
+    configureServer(server: ViteDevServer) {
+      registerAiProxy(server.middlewares, env)
+    },
+    // Production-build preview server (`vite preview`) — what Cloud Run runs.
+    configurePreviewServer(server: PreviewServer) {
+      registerAiProxy(server.middlewares, env)
     },
   }
 }
 
 export default defineConfig(({ mode }) => {
-  // '' prefix loads ALL env vars (including non-VITE_ secrets) into THIS Node
-  // process only; non-VITE_ keys are never exposed to the client bundle.
+  // '' prefix loads ALL env vars (incl. non-VITE_ secrets) into THIS Node process
+  // only; non-VITE_ keys are never exposed to the client bundle.
   const env = loadEnv(mode, process.cwd(), '')
   return {
     plugins: [react(), aiProxyPlugin(env)],
@@ -138,6 +158,11 @@ export default defineConfig(({ mode }) => {
       alias: {
         '@': path.resolve(__dirname, './src'),
       },
+    },
+    // Cloud Run serves over its own *.run.app host; allow it (and any host) so the
+    // preview server doesn't reject the request with a host check.
+    preview: {
+      allowedHosts: true,
     },
   }
 })

@@ -1,0 +1,11 @@
+# Never copy these into the image.
+# .env holds the Anthropic key — it must NOT be baked into the image; the key is
+# injected at runtime as a Cloud Run env var instead.
+.env
+.env.*
+!.env.example
+
+node_modules
+dist
+.git
+*.log

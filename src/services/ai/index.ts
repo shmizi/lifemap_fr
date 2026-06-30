@@ -18,8 +18,13 @@ import { AnthropicProvider } from '@/services/ai/AnthropicProvider'
 
 export type { AIProvider } from '@/services/ai/AIProvider'
 
-// The app-wide provider singleton.
-export const aiProvider: AIProvider =
-  import.meta.env.VITE_USE_REAL_AI === 'true'
-    ? new AnthropicProvider()
-    : new MockAI()
+// The app-wide provider singleton. Real Claude only when explicitly enabled AND
+// not under test — tests must never hit the network (the /api/ai proxy doesn't
+// exist there, and a relative fetch has no base URL in Node), so they always get
+// the deterministic MockAI regardless of what a local .env sets.
+const useRealAI =
+  import.meta.env.VITE_USE_REAL_AI === 'true' && import.meta.env.MODE !== 'test'
+
+export const aiProvider: AIProvider = useRealAI
+  ? new AnthropicProvider()
+  : new MockAI()
