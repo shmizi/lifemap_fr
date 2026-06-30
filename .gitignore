@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# Environment files — NEVER commit real keys. `.env` holds ANTHROPIC_API_KEY
+# (server-side only). The committed template `.env.example` is the exception.
+.env
+.env.*
+!.env.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

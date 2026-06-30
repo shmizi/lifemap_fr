@@ -57,5 +57,7 @@ export function buildDailyPlanPrompt(context: DailyPlanContext): AIRequest {
   return {
     system: SYSTEM_INSTRUCTION,
     messages: [{ role: 'user', content: lines.join('\n') }],
+    // High-volume, less nuanced day-by-day scheduling — use the fast tier.
+    tier: 'fast',
   }
 }
