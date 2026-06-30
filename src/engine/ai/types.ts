@@ -31,6 +31,14 @@ export interface AIMessage {
   content: string
 }
 
+// A provider-agnostic INTENT hint, not a model name: 'quality' for nuanced,
+// tailoring-sensitive work (goal/subgoal/milestone decomposition), 'fast' for
+// routine high-volume structuring (daily plans, opportunity extraction). The
+// provider maps a tier to a concrete model (the dev proxy: quality -> Sonnet,
+// fast -> Haiku); MockAI ignores it. Keeping the engine in intent-space (not
+// model ids) is what lets the model choice live entirely in the provider/proxy.
+export type AIModelTier = 'quality' | 'fast'
+
 // What every prompt builder returns and every provider accepts. Intentionally
 // minimal — system instruction + the conversation turns + an advisory output
 // cap. `maxTokens` is a hint a provider MAY honour, not a guarantee the engine
@@ -39,6 +47,9 @@ export interface AIRequest {
   system: string
   messages: AIMessage[]
   maxTokens?: number
+  // Which model tier this task wants (see AIModelTier). Optional; the provider
+  // treats an absent tier as 'quality' (the safe default).
+  tier?: AIModelTier
 }
 
 // What every provider returns. Just the model's raw text — turning that text

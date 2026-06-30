@@ -61,5 +61,7 @@ export function buildSubgoalPrompt(context: SubgoalSuggestionContext): AIRequest
   return {
     system: SYSTEM_INSTRUCTION,
     messages: [{ role: 'user', content: lines.join('\n') }],
+    // Decomposition is the nuanced, tailoring-sensitive step — use the quality tier.
+    tier: 'quality',
   }
 }

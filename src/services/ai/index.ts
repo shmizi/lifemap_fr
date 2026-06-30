@@ -1,18 +1,25 @@
 // services/ai/index.ts — the single place the rest of the app gets its AI
-// provider, and the ONE line that decides which backend answers.
+// provider, and the ONE switch that decides which backend answers.
 //
 // The store imports `aiProvider` (typed as the AIProvider interface) from here
-// and never knows the concrete implementation. Today that is MockAI; in Phase 6
-// it becomes an Anthropic-backed provider talking to the edge proxy. Because the
-// type is the interface, that swap is a one-line change in THIS file — the
-// store, engine prompts, and parsers are untouched.
+// and never knows the concrete implementation. The switch is the non-secret
+// VITE_USE_REAL_AI flag: when "true", AI goes through AnthropicProvider -> the
+// same-origin /api/ai dev proxy -> real Claude (the API key lives only in the
+// proxy, never in this bundle). Anything else (including unset) uses MockAI, so
+// the default build and any contributor without a key get deterministic mocks.
+//
+// Going to production (the deferred go-live phase) means standing up the same
+// /api/ai path as a Vercel edge function and setting VITE_USE_REAL_AI=true there
+// — no change to this file's logic, the engine, the parsers, or the store.
 
 import type { AIProvider } from '@/services/ai/AIProvider'
 import { MockAI } from '@/services/ai/MockAI'
+import { AnthropicProvider } from '@/services/ai/AnthropicProvider'
 
 export type { AIProvider } from '@/services/ai/AIProvider'
 
-// The app-wide provider singleton. Swap the right-hand side to the real provider
-// when the Phase 6 key proxy exists; the `AIProvider` annotation guarantees the
-// replacement satisfies the same contract.
-export const aiProvider: AIProvider = new MockAI()
+// The app-wide provider singleton.
+export const aiProvider: AIProvider =
+  import.meta.env.VITE_USE_REAL_AI === 'true'
+    ? new AnthropicProvider()
+    : new MockAI()

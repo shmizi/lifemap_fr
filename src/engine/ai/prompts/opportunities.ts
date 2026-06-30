@@ -53,5 +53,7 @@ export function buildOpportunityExtractionPrompt(
   return {
     system: SYSTEM_INSTRUCTION,
     messages: [{ role: 'user', content: lines.join('\n') }],
+    // Mechanical structuring of search results — use the fast tier.
+    tier: 'fast',
   }
 }

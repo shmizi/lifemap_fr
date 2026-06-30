@@ -71,5 +71,7 @@ export function buildMilestonePrompt(
   return {
     system: SYSTEM_INSTRUCTION,
     messages: [{ role: 'user', content: lines.join('\n') }],
+    // Checkpoint decomposition is part of the nuanced roadmap step — quality tier.
+    tier: 'quality',
   }
 }

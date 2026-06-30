@@ -6,6 +6,7 @@ import {
 } from '@/engine/ai/prompts/system'
 import { buildSubgoalPrompt } from '@/engine/ai/prompts/subgoals'
 import { buildMilestonePrompt } from '@/engine/ai/prompts/milestones'
+import { buildDailyPlanPrompt } from '@/engine/ai/prompts/dailyPlan'
 import type { AIUserContext, AIGoalContext } from '@/engine/ai/types'
 
 describe('LIFEMAP_SYSTEM_PROMPT', () => {
@@ -112,6 +113,34 @@ describe('context flows into the feature prompts', () => {
     }).messages[0].content
     expect(text.split('\n').some((l) => l.startsWith('Subgoal:'))).toBe(true)
     expect(text).toContain('About the person')
+  })
+
+  it('tags decomposition prompts "quality" and the daily plan "fast"', () => {
+    expect(
+      buildSubgoalPrompt({
+        goalId: 'g1',
+        goalTitle: 'X',
+        goalDescription: '',
+        goalCategory: 'Education',
+      }).tier,
+    ).toBe('quality')
+    expect(
+      buildMilestonePrompt({
+        goalId: 'g1',
+        goalTitle: 'X',
+        subgoalTitle: 'Y',
+        subgoalDescription: '',
+      }).tier,
+    ).toBe('quality')
+    expect(
+      buildDailyPlanPrompt({
+        subgoalTitle: 'Y',
+        subgoalDescription: '',
+        goalTitle: 'X',
+        dailyMinutes: 30,
+        days: 7,
+      }).tier,
+    ).toBe('fast')
   })
 
   it('omits context blocks entirely when none is provided', () => {
