@@ -51,6 +51,10 @@ export function GoalDetailPage() {
   const [isAddSubgoalOpen, setIsAddSubgoalOpen] = useState(false)
   const [isSuggestSubgoalsOpen, setIsSuggestSubgoalsOpen] = useState(false)
   const [isEditGoalOpen, setIsEditGoalOpen] = useState(false)
+  // One-click autonomous roadmap build (subgoals -> milestones -> dated tasks).
+  const generateFullRoadmap = useGoalStore((s) => s.generateFullRoadmap)
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [genError, setGenError] = useState<string | null>(null)
 
   if (isLoading) {
     return (
@@ -80,6 +84,25 @@ export function GoalDetailPage() {
     title: st.subgoal.title,
   }))
 
+  // Build (or fill in) the whole roadmap with AI. Long-running — multiple model
+  // calls — so it carries its own loading + inline error, distinct from the calm
+  // refresh banner. The store's add* writes refresh the open tree as they land,
+  // so the page fills in progressively while this runs.
+  async function handleGenerateRoadmap() {
+    if (isGenerating) return
+    setIsGenerating(true)
+    setGenError(null)
+    try {
+      await generateFullRoadmap(goal.id)
+    } catch (e) {
+      setGenError(
+        e instanceof Error ? e.message : 'Could not generate the roadmap.',
+      )
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
   return (
     <section className="mx-auto max-w-3xl">
       <BackLink />
@@ -101,6 +124,29 @@ export function GoalDetailPage() {
               Edit
             </button>
           </div>
+        </div>
+
+        {/* Headline action: let the AI build the entire roadmap from this goal —
+            subgoals, milestones, and a dated run of daily tasks — in one click. */}
+        <div className="mt-4">
+          <button
+            type="button"
+            onClick={handleGenerateRoadmap}
+            disabled={isGenerating}
+            className="inline-flex items-center gap-2 rounded-app-lg bg-app-text px-4 py-2 text-sm font-semibold text-app-surface transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+          >
+            <Sparkles size={16} />
+            {isGenerating ? 'Building your roadmap…' : 'Generate roadmap with AI'}
+          </button>
+          {isGenerating ? (
+            <p className="mt-2 text-xs text-app-text-muted">
+              Drafting subgoals, milestones, and daily tasks. This takes a little
+              while — the plan fills in as it goes.
+            </p>
+          ) : null}
+          {genError ? (
+            <p className="mt-2 text-xs text-red-600">{genError}</p>
+          ) : null}
         </div>
 
         {goal.description ? (
@@ -157,24 +203,25 @@ export function GoalDetailPage() {
         {subgoals.length === 0 ? (
           <div className="mt-3 rounded-app-lg border border-dashed border-app-border bg-app-surface p-8 text-center">
             <p className="text-sm text-app-text-muted">
-              No subgoals yet. Break this goal into the major parts it depends on.
+              No subgoals yet. Let the AI draft the whole plan, or build it yourself.
             </p>
             <div className="mt-4 flex flex-wrap justify-center gap-3">
               <button
                 type="button"
-                onClick={() => setIsAddSubgoalOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-app-lg bg-app-text px-4 py-2 text-sm font-semibold text-app-surface transition hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+                onClick={handleGenerateRoadmap}
+                disabled={isGenerating}
+                className="inline-flex items-center gap-1.5 rounded-app-lg bg-app-text px-4 py-2 text-sm font-semibold text-app-surface transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
               >
-                <Plus size={16} />
-                Add your first subgoal
+                <Sparkles size={16} />
+                {isGenerating ? 'Building your roadmap…' : 'Generate roadmap with AI'}
               </button>
               <button
                 type="button"
-                onClick={() => setIsSuggestSubgoalsOpen(true)}
+                onClick={() => setIsAddSubgoalOpen(true)}
                 className="inline-flex items-center gap-1.5 rounded-app-lg border border-app-border px-4 py-2 text-sm font-semibold text-app-text transition hover:bg-app-border/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
               >
-                <Sparkles size={16} />
-                Suggest subgoals
+                <Plus size={16} />
+                Add subgoal manually
               </button>
             </div>
           </div>

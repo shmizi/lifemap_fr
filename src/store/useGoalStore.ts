@@ -72,6 +72,10 @@ import type {
 import { aiProvider } from '@/services/ai'
 import {
   DAILY_PLAN_HORIZON,
+  DEFAULT_SUBGOAL_STATUS,
+  DEFAULT_MILESTONE_STATUS,
+  DEFAULT_TASK_STATUS,
+  DEFAULT_TASK_PRIORITY,
   LIFE_SITUATION_OPTIONS,
   TIME_OF_DAY_OPTIONS,
   WORK_RHYTHM_OPTIONS,
@@ -423,6 +427,14 @@ interface GoalState {
   generateDailyPlan: (
     request: DailyPlanRequest,
   ) => Promise<ScheduledDailyTask[]>
+
+  // Autonomous roadmap generation: from a goal, produce the WHOLE plan in one
+  // action — subgoals (if the goal has none yet), then for each subgoal its
+  // milestones and a dated run of daily tasks. Orchestrates the three existing AI
+  // actions + the existing write paths; writes everything directly (no per-item
+  // accept step) so "type a goal, get a full actionable roadmap" is one click.
+  // Skips any level that already has data, so it can also fill in an existing goal.
+  generateFullRoadmap: (goalId: ID) => Promise<void>
 
   // --- cross-cutting error state ---
   // A single, calm, NON-FATAL message set when a background load or post-write
@@ -1295,6 +1307,122 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       )
       const sessions = parseSuggestionList(response, days)
       return scheduleDailyTasks(sessions, startDate, request.dailyMinutes)
+    },
+
+    // Build the whole roadmap from a goal in one go. Reuses the three AI actions
+    // above + the existing add* write paths (each of which refreshes the open
+    // tree), so the user watches subgoals, milestones, and dated tasks fill in.
+    // Sequential by necessity: order is max(siblings)+1 in the writes, and each
+    // subgoal's id is needed before its children can be created.
+    generateFullRoadmap: async (goalId) => {
+      const tree = await getGoalTree(goalId)
+      if (!tree) return
+      const goal = tree.goal
+
+      // Capacity: split the user's available daily time across the subgoals, so
+      // the generated daily tasks across ALL subgoals stay within what they said
+      // they can do in a day (rather than each subgoal blindly claiming a full
+      // session). A simple even split — the full day-packer is a later refinement.
+      const profile = await getProfile()
+      const dayMinutes = (profile?.availableHoursPerDay ?? 4) * 60
+      const minutesPerSubgoal = (count: number): number =>
+        Math.max(15, Math.round(dayMinutes / Math.max(1, count)))
+
+      // Existing structure (so a re-run fills gaps instead of duplicating).
+      type Sg = {
+        id: ID
+        title: string
+        description: string
+        hasMilestones: boolean
+        hasTasks: boolean
+      }
+      let subgoals: Sg[] = tree.subgoals.map((st) => ({
+        id: st.subgoal.id,
+        title: st.subgoal.title,
+        description: st.subgoal.description,
+        hasMilestones: st.milestones.length > 0,
+        hasTasks:
+          st.looseTasks.length > 0 ||
+          st.milestones.some((m) => m.tasks.length > 0),
+      }))
+
+      // 1) Subgoals — only when the goal has none yet.
+      if (subgoals.length === 0) {
+        const suggestions = await get().suggestSubgoals({
+          goalId,
+          goalTitle: goal.title,
+          goalDescription: goal.description,
+          goalCategory: goal.category,
+          existingSubgoalTitles: [],
+        })
+        const perDay = minutesPerSubgoal(suggestions.length)
+        const created: Sg[] = []
+        for (const s of suggestions) {
+          const sg = await get().addSubgoal({
+            goalId,
+            title: s.title,
+            description: s.description ?? '',
+            status: DEFAULT_SUBGOAL_STATUS,
+            requiresConsistency: true,
+            estimatedDailyMinutes: perDay,
+          })
+          created.push({
+            id: sg.id,
+            title: sg.title,
+            description: sg.description,
+            hasMilestones: false,
+            hasTasks: false,
+          })
+        }
+        subgoals = created
+      }
+
+      // 2) Per subgoal: milestones (if none) + a dated daily plan (if no tasks).
+      // Each subgoal's daily session is capped to its share of the day's minutes.
+      const perSubgoalMinutes = minutesPerSubgoal(subgoals.length)
+      for (const sg of subgoals) {
+        if (!sg.hasMilestones) {
+          const milestones = await get().suggestMilestones({
+            goalId,
+            goalTitle: goal.title,
+            subgoalTitle: sg.title,
+            subgoalDescription: sg.description,
+            existingMilestoneTitles: [],
+          })
+          for (const m of milestones) {
+            await get().addMilestone({
+              subgoalId: sg.id,
+              title: m.title,
+              status: DEFAULT_MILESTONE_STATUS,
+              aiSuggested: true,
+              ...(m.description ? { description: m.description } : {}),
+            })
+          }
+        }
+        if (!sg.hasTasks) {
+          const plan = await get().generateDailyPlan({
+            subgoalId: sg.id,
+            goalId,
+            subgoalTitle: sg.title,
+            subgoalDescription: sg.description,
+            goalTitle: goal.title,
+            dailyMinutes: perSubgoalMinutes,
+            ...(goal.targetDate ? { targetDate: goal.targetDate } : {}),
+          })
+          for (const t of plan) {
+            await get().addTask({
+              subgoalId: sg.id,
+              title: t.title,
+              status: DEFAULT_TASK_STATUS,
+              priority: DEFAULT_TASK_PRIORITY,
+              isRecurring: false,
+              scheduledDate: t.scheduledDate,
+              estimatedMinutes: t.estimatedMinutes,
+              ...(t.description ? { description: t.description } : {}),
+            })
+          }
+        }
+      }
     },
   }
 })
