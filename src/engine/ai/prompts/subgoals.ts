@@ -13,10 +13,13 @@ import {
   renderUserContextLines,
   renderGoalContextLines,
 } from '@/engine/ai/prompts/system'
+import { renderStrategyBriefLines } from '@/engine/ai/prompts/strategyBrief'
 
-// How many subgoals we ask for. Kept small: a goal breaks into a handful of
-// major parts, not a long list. Exported so the parser cap and tests share it.
-export const SUGGESTED_SUBGOAL_COUNT = 5
+// Defensive hard ceiling on subgoals accepted from one suggestion. The model is
+// asked to recommend AS MANY as the goal genuinely needs (see the prompt), not a
+// fixed count — this only stops a runaway reply from dumping dozens. Generous on
+// purpose. Exported so the parser cap and tests share one value.
+export const MAX_SUBGOAL_SUGGESTIONS = 12
 
 // The shared planning philosophy (LIFEMAP_SYSTEM_PROMPT) plus this feature's
 // output contract. Both are needed: the philosophy so suggestions are tailored
@@ -25,7 +28,7 @@ const SYSTEM_INSTRUCTION = [
   LIFEMAP_SYSTEM_PROMPT,
   'For this request, break a long-term personal goal into its major subgoals.',
   'A subgoal is a significant part the goal depends on, not a single task or milestone.',
-  `Suggest at most ${SUGGESTED_SUBGOAL_COUNT} subgoals that together cover the goal.`,
+  'Suggest as many subgoals as the goal genuinely needs to be fully covered — most goals need a handful (about 3 to 6), more only when the goal is genuinely broad, fewer when it is tight. Prefer the number that divides the goal cleanly; do not pad the list with filler, and do not split one part into several.',
   'Each needs a short title and one concise sentence describing what it involves.',
   'Respond with ONLY a JSON array of objects shaped {"title": string, "description": string}.',
   'No prose, no markdown, no code fences around the array.',
@@ -39,6 +42,7 @@ export function buildSubgoalPrompt(context: SubgoalSuggestionContext): AIRequest
     existingSubgoalTitles,
     userContext,
     goalContext,
+    strategyBrief,
   } = context
 
   const lines: string[] = [
@@ -51,6 +55,9 @@ export function buildSubgoalPrompt(context: SubgoalSuggestionContext): AIRequest
   // Personalization: who this is for and where they stand on the goal.
   lines.push(...renderUserContextLines(userContext))
   lines.push(...renderGoalContextLines(goalContext))
+  // Phase 10: the Direction the subgoals must serve — the sharpened target and
+  // ranked priorities from the goal's Strategy Brief (empty when none generated).
+  lines.push(...renderStrategyBriefLines(strategyBrief))
   if (existingSubgoalTitles && existingSubgoalTitles.length > 0) {
     lines.push(
       `It already has these subgoals, do not repeat them: ${existingSubgoalTitles.join('; ')}`,

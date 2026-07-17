@@ -32,7 +32,7 @@ export function WeeklyReviewPage() {
           ? `Your week: ${formatDay(weeklyReview.windowStart)} – ${formatDay(
               weeklyReview.windowEnd,
             )}.`
-          : 'The 7 days leading up to today.'}
+          : 'The last 7 days, including today.'}
       </p>
 
       <div className="mt-6 space-y-4">

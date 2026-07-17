@@ -62,6 +62,21 @@ const SUBGOAL_TEMPLATES: ReadonlyArray<{ title: string; description: string }> =
 
 export class MockAI implements AIProvider {
   complete(request: AIRequest): Promise<AIResponse> {
+    // A strategy-brief prompt is the only one whose SYSTEM asks for a "strategy
+    // brief" — check it FIRST. Unlike the others it returns a single JSON OBJECT,
+    // not an array, so it must not fall through to the Subgoal/Goal array branch
+    // (its user message carries a "Goal:" line that would otherwise match).
+    // An intake prompt is the only one whose SYSTEM asks for "intake questions" —
+    // check it before the strategy-brief and Subgoal/Goal branches (its user
+    // message also carries a "Goal:" line). It returns a JSON array of strings.
+    if (request.system.includes('intake questions')) {
+      return Promise.resolve({ text: this.intakeQuestions(request) })
+    }
+
+    if (request.system.includes('strategy brief')) {
+      return Promise.resolve({ text: this.strategyBrief(request) })
+    }
+
     // A daily-plan prompt is the only one with a "Days to plan:" line — check it
     // FIRST, because that prompt also carries a "Subgoal:" line (which would
     // otherwise look like a milestone request).
@@ -95,6 +110,48 @@ export class MockAI implements AIProvider {
     return Promise.resolve({ text: JSON.stringify(suggestions) })
   }
 
+  // A short set of deterministic, plausible intake questions (a JSON array of
+  // strings) that name the goal so the output responds to the input. A real model
+  // asks sharper, goal-specific questions; the mock just proves the flow.
+  private intakeQuestions(request: AIRequest): string {
+    const goal = extractLine(request, 'Goal') ?? 'this goal'
+    const questions = [
+      `What does success on "${goal}" concretely look like for you?`,
+      'What is your honest starting point, and what have you already done toward it?',
+      'How firm is the deadline, and how much time can you give it each week?',
+      'What constraints (money, tools, access, other commitments) should shape the plan?',
+      'What matters most to you here, and what would you be fine cutting?',
+    ]
+    return JSON.stringify(questions)
+  }
+
+  // A deterministic, plausible strategy brief in the exact JSON-OBJECT shape
+  // parsers/strategyBrief.ts expects. Names the goal so the output visibly
+  // responds to the input, the same way the suggestion mocks do.
+  private strategyBrief(request: AIRequest): string {
+    const goal = extractLine(request, 'Goal') ?? 'this goal'
+    const brief = {
+      sharpenedTarget: `Make steady, deliberate progress on ${goal} and reach it on time.`,
+      theme: '',
+      priorities: [
+        {
+          title: 'Build the foundation first',
+          rationale: 'Everything later depends on getting the basics solid.',
+        },
+        {
+          title: 'Practice consistently',
+          rationale: 'Steady momentum beats occasional intensity.',
+        },
+        {
+          title: 'Review and adjust',
+          rationale: 'Catch drift early and correct course before it costs time.',
+        },
+      ],
+      notes: [`Plan tailored to ${goal}.`],
+    }
+    return JSON.stringify(brief)
+  }
+
   // Generate `days` ordered daily sessions (capped to the horizon), cycling a few
   // generic focuses and naming the subgoal so the output responds to the input.
   private dailyPlan(request: AIRequest, daysLine: string): string {
@@ -103,10 +160,18 @@ export class MockAI implements AIProvider {
     const days = Number.isFinite(parsed)
       ? Math.max(1, Math.min(parsed, DAILY_FOCUS_HORIZON))
       : 1
-    const sessions = Array.from({ length: days }, (_, i) => ({
-      title: `Day ${i + 1}: ${DAILY_FOCUSES[i % DAILY_FOCUSES.length]}`,
-      description: `Spend today's session on ${subject}.`,
-    }))
+    const sessions = Array.from({ length: days }, (_, i) => {
+      const base = {
+        title: `Day ${i + 1}: ${DAILY_FOCUSES[i % DAILY_FOCUSES.length]}`,
+        description: `Spend today's session on ${subject}.`,
+        // Vary the duration so the mock exercises the model-decided-minutes path
+        // (a real model sizes each session; the mock just cycles a few values).
+        minutes: MOCK_SESSION_MINUTES[i % MOCK_SESSION_MINUTES.length],
+      }
+      // Make one session a recurring habit (every other day) so the mock also
+      // exercises the cadence/overlay path; the rest are one-time progression.
+      return i === 1 ? { ...base, recurrence: { everyDays: 2 } } : base
+    })
     return JSON.stringify(sessions)
   }
 
@@ -145,6 +210,9 @@ const DAILY_FOCUSES: ReadonlyArray<string> = [
   'Apply and self-test',
 ]
 const DAILY_FOCUS_HORIZON = 14
+// Cycled per-session minute estimates so the mock's daily plan has VARYING
+// durations (mirrors a real model sizing each session differently).
+const MOCK_SESSION_MINUTES: ReadonlyArray<number> = [20, 30, 45, 30]
 
 // Generic opportunity shapes the mock extraction returns, one per common type, so
 // a developer sees a varied, plausible set. Distinct from the suggestion/daily

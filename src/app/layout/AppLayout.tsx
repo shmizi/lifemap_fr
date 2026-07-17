@@ -12,12 +12,16 @@ import { Sidebar } from '@/app/layout/Sidebar'
 import { Topbar } from '@/app/layout/Topbar'
 import { ErrorBanner } from '@/components/ui/ErrorBanner'
 import { OnboardingGate } from '@/features/onboarding/OnboardingGate'
+import { useTaskReminders } from '@/core/hooks/useTaskReminders'
 import { useUIStore } from '@/store/useUIStore'
 import { useGoalStore } from '@/store/useGoalStore'
 import { useDiscoveryStore } from '@/store/useDiscoveryStore'
 import { LAYOUT } from '@/core/constants/layout'
 
 export function AppLayout() {
+  // In-app task reminders (no-op unless enabled + permitted; see the hook).
+  useTaskReminders()
+
   const sidebarOpen = useUIStore((state) => state.sidebarOpen)
   // A non-fatal data error surfaced once, app-wide, just under the Topbar. Both
   // independent stores (goals + discovery) report through this ONE banner: the

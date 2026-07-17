@@ -7,16 +7,25 @@
 // layered-complexity rule there is deliberately no graph here; that is a later
 // phase. Lives in pages/ (route-level), pulling sub-parts from features/goals/.
 
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, Plus, Pencil, Sparkles } from 'lucide-react'
+import {
+  ArrowLeft,
+  Plus,
+  Pencil,
+  Sparkles,
+  CalendarPlus,
+  CalendarClock,
+} from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { ROUTES, GOAL_CATEGORY_OPTIONS } from '@/core/constants'
+import { googleCalendarUrl } from '@/core/utils/googleCalendar'
 import { useGoalTree } from '@/core/hooks/useGoalTree'
 import { useDependencyGraph } from '@/core/hooks/useDependencyGraph'
 import { useGoalStore } from '@/store/useGoalStore'
 import { ProgressRing } from '@/components/progress/ProgressRing'
 import { SubgoalSection } from '@/features/goals/SubgoalSection'
+import { StrategyBriefPanel } from '@/features/goals/StrategyBriefPanel'
 import { SubgoalCreationModal } from '@/features/goals/SubgoalCreationModal'
 import { SuggestedSubgoalsModal } from '@/features/goals/SuggestedSubgoalsModal'
 import { GoalCreationModal } from '@/features/goals/GoalCreationModal'
@@ -55,6 +64,22 @@ export function GoalDetailPage() {
   const generateFullRoadmap = useGoalStore((s) => s.generateFullRoadmap)
   const [isGenerating, setIsGenerating] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
+  // Reschedule-on-miss: pull this goal's overdue tasks back onto upcoming days.
+  const rescheduleOverdueForGoal = useGoalStore((s) => s.rescheduleOverdueForGoal)
+  const [isRescheduling, setIsRescheduling] = useState(false)
+  const [rescheduleNote, setRescheduleNote] = useState<string | null>(null)
+
+  // Auto top-up: on opening a goal, extend any consistency subgoal whose rolling
+  // task window is running low. Best-effort and once per goal — it only fires AI
+  // for subgoals that are actually low (a freshly generated plan is not), so most
+  // opens do nothing. Runs in the background; new tasks appear as they land.
+  const topUpRoadmap = useGoalStore((s) => s.topUpRoadmap)
+  const toppedUpFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (!id || toppedUpFor.current === id) return
+    toppedUpFor.current = id
+    void topUpRoadmap(id)
+  }, [id, topUpRoadmap])
 
   if (isLoading) {
     return (
@@ -83,6 +108,39 @@ export function GoalDetailPage() {
     id: st.subgoal.id,
     title: st.subgoal.title,
   }))
+
+  // Overdue = scheduled before today AND not yet completed (missed work). Derived
+  // read-only from the loaded tree; drives the reschedule nudge below.
+  const today = format(new Date(), 'yyyy-MM-dd')
+  const overdueCount = subgoals
+    .flatMap((st) => [...st.looseTasks, ...st.milestones.flatMap((m) => m.tasks)])
+    .filter(
+      (t) =>
+        t.scheduledDate !== undefined &&
+        t.scheduledDate < today &&
+        t.status !== 'completed',
+    ).length
+
+  // Move this goal's missed tasks forward onto upcoming working days (capacity- and
+  // deadline-aware in the store). The store refreshes the tree, so overdueCount
+  // recomputes and the nudge clears on success.
+  async function handleReschedule() {
+    if (isRescheduling) return
+    setIsRescheduling(true)
+    setRescheduleNote(null)
+    try {
+      const moved = await rescheduleOverdueForGoal(goal.id)
+      setRescheduleNote(
+        moved > 0
+          ? `Moved ${moved} missed task${moved === 1 ? '' : 's'} onto your upcoming days.`
+          : 'Nothing needed rescheduling.',
+      )
+    } catch {
+      setRescheduleNote('Could not reschedule just now. Please try again.')
+    } finally {
+      setIsRescheduling(false)
+    }
+  }
 
   // Build (or fill in) the whole roadmap with AI. Long-running — multiple model
   // calls — so it carries its own loading + inline error, distinct from the calm
@@ -169,10 +227,55 @@ export function GoalDetailPage() {
           </div>
         ) : null}
 
-        <p className="mt-4 text-xs text-app-text-muted">
-          Target {format(parseISO(goal.targetDate), 'd MMM yyyy')}
-        </p>
+        <div className="mt-4 flex items-center gap-3">
+          <p className="text-xs text-app-text-muted">
+            Target {format(parseISO(goal.targetDate), 'd MMM yyyy')}
+          </p>
+          <a
+            href={googleCalendarUrl({
+              title: `Deadline: ${goal.title}`,
+              date: goal.targetDate,
+              details: goal.description,
+            })}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-xs text-app-text-muted transition hover:text-app-text focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+          >
+            <CalendarPlus size={13} aria-hidden />
+            Add to Google Calendar
+          </a>
+        </div>
       </header>
+
+      {/* Reschedule-on-miss: when tasks have slipped past their date, offer to pull
+          them back onto upcoming days (capacity/deadline aware). Clears itself once
+          nothing is overdue. */}
+      {overdueCount > 0 ? (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-app-lg border border-app-border bg-app-surface-alt p-4">
+          <p className="text-sm text-app-text">
+            <span className="font-medium text-amber-600">
+              {overdueCount} missed task{overdueCount === 1 ? '' : 's'}
+            </span>{' '}
+            slipped past their date.
+          </p>
+          <button
+            type="button"
+            onClick={handleReschedule}
+            disabled={isRescheduling}
+            className="inline-flex items-center gap-1.5 rounded-app-lg border border-app-border px-3 py-1.5 text-sm font-medium text-app-text transition hover:bg-app-border/30 disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+          >
+            <CalendarClock size={15} aria-hidden />
+            {isRescheduling ? 'Rescheduling…' : 'Reschedule onto upcoming days'}
+          </button>
+        </div>
+      ) : null}
+      {rescheduleNote ? (
+        <p className="mt-2 text-xs text-app-text-muted">{rescheduleNote}</p>
+      ) : null}
+
+      {/* Direction layer (Phase 10) — the strategy brief, above the roadmap:
+          "what am I really aiming at?" before "what do I do?". */}
+      <StrategyBriefPanel goalId={goal.id} />
 
       {/* Subgoals */}
       <div className="mt-8">

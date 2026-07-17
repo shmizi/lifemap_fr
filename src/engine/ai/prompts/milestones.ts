@@ -17,6 +17,7 @@ import {
   renderUserContextLines,
   renderGoalContextLines,
 } from '@/engine/ai/prompts/system'
+import { renderStrategyBriefLines } from '@/engine/ai/prompts/strategyBrief'
 
 // How many checkpoints we ask the model to produce. Matches the parser's cap
 // (see MAX_MILESTONE_SUGGESTIONS there) so prompt and parser agree on volume —
@@ -46,6 +47,7 @@ export function buildMilestonePrompt(
     existingMilestoneTitles,
     userContext,
     goalContext,
+    strategyBrief,
   } = context
 
   // Lines are assembled conditionally so empty optional fields never inject a
@@ -60,6 +62,8 @@ export function buildMilestonePrompt(
   // Personalization: who this is for and where they stand on the parent goal.
   lines.push(...renderUserContextLines(userContext))
   lines.push(...renderGoalContextLines(goalContext))
+  // Phase 10: the Direction the checkpoints must serve (goal's Strategy Brief).
+  lines.push(...renderStrategyBriefLines(strategyBrief))
   if (existingMilestoneTitles && existingMilestoneTitles.length > 0) {
     // Steer away from duplicating checkpoints the subgoal already has.
     lines.push(

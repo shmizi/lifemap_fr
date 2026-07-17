@@ -3,8 +3,9 @@ import type { ISODate, Task, TaskStatus } from '@/core/types'
 import { computeWeeklyReview } from './computeWeeklyReview'
 
 // Fixed "now" — a mid-day timestamp so local-day reduction is unambiguous in the
-// test runner's zone. Window is the 7 days before 2026-06-18: 2026-06-11 ..
-// 2026-06-17 (today, the 18th, is excluded).
+// test runner's zone. Window is the rolling 7 days INCLUDING 2026-06-18:
+// 2026-06-12 .. 2026-06-18 (today). Today counts for completed/momentum, but
+// today's still-open scheduled tasks are NOT "missed".
 const NOW = new Date('2026-06-18T12:00:00')
 
 // date-only YYYY-MM-DD at `offset` days from NOW.
@@ -44,13 +45,13 @@ function completed(overrides: Partial<Task> = {}): Task {
 }
 
 describe('computeWeeklyReview', () => {
-  it('window is the 7 days before today, ending yesterday', () => {
+  it('window is the rolling 7 days including today', () => {
     const r = computeWeeklyReview([], NOW)
-    expect(r.windowStart).toBe('2026-06-11') // now - 7
-    expect(r.windowEnd).toBe('2026-06-17') // now - 1 (yesterday)
+    expect(r.windowStart).toBe('2026-06-12') // now - 6
+    expect(r.windowEnd).toBe('2026-06-18') // today
     expect(r.dailyMomentum).toHaveLength(7)
-    expect(r.dailyMomentum[0].date).toBe('2026-06-11')
-    expect(r.dailyMomentum[6].date).toBe('2026-06-17')
+    expect(r.dailyMomentum[0].date).toBe('2026-06-12')
+    expect(r.dailyMomentum[6].date).toBe('2026-06-18')
   })
 
   it('an empty week has no completed/missed and all-zero momentum', () => {
@@ -60,44 +61,56 @@ describe('computeWeeklyReview', () => {
     expect(r.dailyMomentum.every((p) => p.percent === 0)).toBe(true)
   })
 
-  it('counts completed by completedAt-in-window, missed by scheduled-and-open', () => {
+  it('counts today as completed, but today is never missed', () => {
     const doneInWindow = completed({ completedAt: ts(-2) }) // 06-16
-    const doneToday = completed({ completedAt: ts(0) }) // excluded (today)
-    const missed = makeTask({ scheduledDate: day(-3) }) // 06-15, pending
+    const doneToday = completed({ completedAt: ts(0) }) // 06-18 — NOW counted
+    const missed = makeTask({ scheduledDate: day(-3) }) // 06-15, past, pending
+    const openToday = makeTask({ scheduledDate: day(0) }) // 06-18, open — NOT missed
     const scheduledButDone = completed({
       scheduledDate: day(-3),
       completedAt: ts(-3),
     }) // counts completed, NOT missed
 
     const r = computeWeeklyReview(
-      [doneInWindow, doneToday, missed, scheduledButDone],
+      [doneInWindow, doneToday, missed, openToday, scheduledButDone],
       NOW,
     )
 
     expect(r.completedTasks.map((t) => t.id).sort()).toEqual(
-      [doneInWindow.id, scheduledButDone.id].sort(),
+      [doneInWindow.id, doneToday.id, scheduledButDone.id].sort(),
     )
     expect(r.missedTasks.map((t) => t.id)).toEqual([missed.id])
   })
 
   it('includes the window boundary days and excludes the days just outside', () => {
-    const onStart = makeTask({ scheduledDate: day(-7) }) // 06-11 (windowStart)
-    const onEnd = makeTask({ scheduledDate: day(-1) }) // 06-17 (windowEnd)
-    const beforeStart = makeTask({ scheduledDate: day(-8) }) // 06-10, out
-    const today = makeTask({ scheduledDate: day(0) }) // 06-18, out
+    const onStart = makeTask({ scheduledDate: day(-6) }) // 06-12 (windowStart), past
+    const onLastPast = makeTask({ scheduledDate: day(-1) }) // 06-17 (yesterday), past
+    const beforeStart = makeTask({ scheduledDate: day(-7) }) // 06-11, out
+    const today = makeTask({ scheduledDate: day(0) }) // 06-18, open — not missed
 
-    const completedOnStart = completed({ completedAt: ts(-7) })
-    const completedBeforeStart = completed({ completedAt: ts(-8) }) // out
+    const completedOnStart = completed({ completedAt: ts(-6) }) // 06-12, in
+    const completedToday = completed({ completedAt: ts(0) }) // 06-18, in
+    const completedBeforeStart = completed({ completedAt: ts(-7) }) // 06-11, out
 
     const r = computeWeeklyReview(
-      [onStart, onEnd, beforeStart, today, completedOnStart, completedBeforeStart],
+      [
+        onStart,
+        onLastPast,
+        beforeStart,
+        today,
+        completedOnStart,
+        completedToday,
+        completedBeforeStart,
+      ],
       NOW,
     )
 
     expect(r.missedTasks.map((t) => t.id).sort()).toEqual(
-      [onStart.id, onEnd.id].sort(),
+      [onStart.id, onLastPast.id].sort(),
     )
-    expect(r.completedTasks.map((t) => t.id)).toEqual([completedOnStart.id])
+    expect(r.completedTasks.map((t) => t.id).sort()).toEqual(
+      [completedOnStart.id, completedToday.id].sort(),
+    )
   })
 
   it('all-completed week: every scheduled task done, none missed', () => {

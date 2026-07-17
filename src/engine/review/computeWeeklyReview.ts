@@ -7,12 +7,13 @@
 // grouping is deliberately NOT done here — that needs a repository lookup, so it
 // is assembled in the store (an assembly concern, not pure math).
 //
-// REVIEW WINDOW (exact, do not redefine): the 7 full calendar days immediately
-// before today — ends yesterday, starts 6 days before that. Today is excluded
-// because it is still in progress and would understate "still open" counts.
-// All day comparisons use LOCAL calendar days (scheduledDate is already a
-// date-only local YYYY-MM-DD; completedAt is a timestamp we reduce to its local
-// day), matching how the dashboard keys its windows.
+// REVIEW WINDOW (exact, do not redefine): a rolling 7 calendar days that INCLUDES
+// today — starts 6 days before today, ends today. Today counts for completed work
+// and daily momentum. The one carve-out: today's still-open scheduled tasks are
+// NOT counted as "missed" (the day isn't over yet), so a task only reads as missed
+// once its day has fully passed. All day comparisons use LOCAL calendar days
+// (scheduledDate is already a date-only local YYYY-MM-DD; completedAt is a
+// timestamp we reduce to its local day), matching how the dashboard keys windows.
 
 import { format, parseISO, subDays } from 'date-fns'
 import type { ISODate, Task } from '@/core/types'
@@ -24,11 +25,11 @@ export interface DailyMomentumPoint {
 }
 
 export interface WeeklyReviewData {
-  windowStart: ISODate // date-only, oldest day in the window
-  windowEnd: ISODate // date-only, yesterday
-  completedTasks: Task[] // completedAt within the window
-  missedTasks: Task[] // scheduled in the window, still open
-  dailyMomentum: DailyMomentumPoint[] // 7 points, windowStart -> windowEnd
+  windowStart: ISODate // date-only, oldest day in the window (today - 6)
+  windowEnd: ISODate // date-only, today
+  completedTasks: Task[] // completedAt within the window (today included)
+  missedTasks: Task[] // scheduled in a PAST window day, still open (today excluded)
+  dailyMomentum: DailyMomentumPoint[] // 7 points, windowStart -> today
 }
 
 // The local calendar day (YYYY-MM-DD) a timestamp falls on.
@@ -37,13 +38,14 @@ function localDay(iso: ISODate): string {
 }
 
 export function computeWeeklyReview(tasks: Task[], now: Date): WeeklyReviewData {
-  // The 7 window days, oldest first: now-7 .. now-1 (today, now-0, excluded).
+  // The 7 window days, oldest first: now-6 .. now (today INCLUDED).
   const days: string[] = []
-  for (let i = 7; i >= 1; i--) {
+  for (let i = 6; i >= 0; i--) {
     days.push(format(subDays(now, i), 'yyyy-MM-dd'))
   }
   const windowStart = days[0]
-  const windowEnd = days[days.length - 1]
+  const windowEnd = days[days.length - 1] // today
+  const today = windowEnd
 
   // Date-only strings sort lexicographically by calendar order, so a plain
   // range check is correct.
@@ -51,19 +53,20 @@ export function computeWeeklyReview(tasks: Task[], now: Date): WeeklyReviewData 
     day >= windowStart && day <= windowEnd
 
   // Completed: completedAt falls within the window — counts even if the task was
-  // scheduled for a different day (or never scheduled).
+  // scheduled for a different day (or never scheduled). Today's completions count.
   const completedTasks = tasks.filter(
     (t) => t.completedAt !== undefined && inWindow(localDay(t.completedAt)),
   )
 
-  // Missed: scheduled within the window and not completed. The window already
-  // ends yesterday, so anything in it is by definition in the past relative to
-  // today; we still gate on status so a task completed (any day) is never
-  // counted as missed.
+  // Missed: scheduled on a window day that has ALREADY PASSED and still open.
+  // Today is deliberately excluded — its open tasks aren't missed yet (the day is
+  // still in progress); they simply haven't been done. Status gates out anything
+  // already completed.
   const missedTasks = tasks.filter(
     (t) =>
       t.scheduledDate !== undefined &&
       inWindow(t.scheduledDate) &&
+      t.scheduledDate < today &&
       t.status !== 'completed',
   )
 

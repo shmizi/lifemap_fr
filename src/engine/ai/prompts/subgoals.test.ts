@@ -1,8 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import {
-  buildSubgoalPrompt,
-  SUGGESTED_SUBGOAL_COUNT,
-} from '@/engine/ai/prompts/subgoals'
+import { buildSubgoalPrompt } from '@/engine/ai/prompts/subgoals'
 import type { SubgoalSuggestionContext } from '@/engine/ai/types'
 
 const userText = (ctx: SubgoalSuggestionContext): string =>
@@ -34,10 +31,10 @@ describe('buildSubgoalPrompt', () => {
     expect(buildSubgoalPrompt(base).system).toContain('JSON array')
   })
 
-  it('caps the requested count at SUGGESTED_SUBGOAL_COUNT', () => {
-    expect(buildSubgoalPrompt(base).system).toContain(
-      String(SUGGESTED_SUBGOAL_COUNT),
-    )
+  it('asks the model to recommend as many subgoals as the goal needs', () => {
+    // No hard fixed count: the model decides the amount that divides the goal
+    // cleanly, rather than always emitting the same number.
+    expect(buildSubgoalPrompt(base).system).toContain('as many subgoals')
   })
 
   it('omits the description line when the goal description is blank', () => {

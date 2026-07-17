@@ -8,10 +8,10 @@
 
 import type { AIResponse, SubgoalSuggestion } from '@/engine/ai/types'
 import { parseSuggestionList } from '@/engine/ai/parsers/suggestionList'
-import { SUGGESTED_SUBGOAL_COUNT } from '@/engine/ai/prompts/subgoals'
+import { MAX_SUBGOAL_SUGGESTIONS } from '@/engine/ai/prompts/subgoals'
 
-// Hard upper bound on accepted suggestions; shares the prompt's asked-for count.
-export const MAX_SUBGOAL_SUGGESTIONS = SUGGESTED_SUBGOAL_COUNT
+// Re-export the defensive ceiling so callers/tests can reach it from the parser.
+export { MAX_SUBGOAL_SUGGESTIONS }
 
 export function parseSubgoalSuggestions(
   response: AIResponse,

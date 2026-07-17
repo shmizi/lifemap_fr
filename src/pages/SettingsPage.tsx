@@ -11,6 +11,7 @@ import { useUserContext } from '@/core/hooks/useUserContext'
 import { ProfileSection } from '@/features/settings/ProfileSection'
 import { UserContextSection } from '@/features/settings/UserContextSection'
 import { AppearanceSection } from '@/features/settings/AppearanceSection'
+import { RemindersSection } from '@/features/settings/RemindersSection'
 
 export function SettingsPage() {
   const { profile, isLoading } = useProfile()
@@ -52,6 +53,8 @@ export function SettingsPage() {
         )}
 
         <AppearanceSection />
+
+        <RemindersSection />
       </div>
     </section>
   )

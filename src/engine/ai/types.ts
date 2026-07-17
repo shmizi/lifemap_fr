@@ -20,7 +20,13 @@
 // A provider swap (MockAI -> Anthropic in Phase 6) changes ONE service file and
 // nothing here, in the prompts, the parsers, or the store.
 
-import type { ID, ISODate, OpportunityType, DeadlineHardness } from '@/core/types'
+import type {
+  ID,
+  ISODate,
+  OpportunityType,
+  DeadlineHardness,
+  StrategyBrief,
+} from '@/core/types'
 
 // ── Provider-agnostic transport ──────────────────────────────────────────────
 
@@ -129,6 +135,9 @@ export interface MilestoneSuggestionContext {
   // Personalization (Phase 9) — filled by the store, not the UI.
   userContext?: AIUserContext
   goalContext?: AIGoalContext
+  // The goal's stored Strategy Brief (Phase 10) — the Direction the checkpoints
+  // should serve. Optional; the store loads it and splices it in when present.
+  strategyBrief?: StrategyBrief
 }
 
 // A suggested checkpoint. The store supplies id/order/status/aiSuggested when an
@@ -155,6 +164,9 @@ export interface SubgoalSuggestionContext {
   // Personalization (Phase 9) — filled by the store, not the UI.
   userContext?: AIUserContext
   goalContext?: AIGoalContext
+  // The goal's stored Strategy Brief (Phase 10) — so the subgoals it breaks into
+  // serve the sharpened target and priorities. Optional; spliced in when present.
+  strategyBrief?: StrategyBrief
 }
 
 export type SubgoalSuggestion = AISuggestion
@@ -183,6 +195,35 @@ export interface DailyPlanRequest {
   targetDate?: ISODate
 }
 
+// How a recurring (maintenance/habit) session repeats (Phase 10 scheduler). Kept
+// minimal on purpose: an interval in days, model-chosen by how much consistency the
+// work needs. 1 = daily, 2 = every other day, 7 = weekly. The plan window bounds how
+// many occurrences land, so there is no count/until here. (A fixed-weekday anchor —
+// "every Sunday" — and adaptive cadence that learns from repeated user delays are
+// deliberate future extensions; v1 is a static interval from the window start.)
+export interface SessionRecurrence {
+  everyDays: number
+}
+
+// One model-planned daily session: title/description PLUS the model's own estimate
+// of how long it takes (`minutes`). This is what makes task DURATION model-decided
+// instead of a hardcoded constant (Phase 10 scheduler). `minutes` is OPTIONAL — a
+// looser reply may omit it, in which case the scheduler/packer applies a default
+// (DEFAULT_DAILY_MINUTES). A superset of AISuggestion, so a PlannedSession is
+// accepted anywhere an AISuggestion is (and a plain AISuggestion works here too,
+// its minutes simply defaulting). The matching parser is parsers/plannedSessions.ts.
+//
+// `recurrence` present ⇒ a recurring HABIT (maintenance work that repeats at a
+// cadence, e.g. regular review); absent ⇒ a one-time PROGRESSION session (the
+// curriculum backbone). The two are scheduled differently (see scheduleDailyTasks /
+// expandRecurringSessions).
+export interface PlannedSession {
+  title: string
+  description?: string
+  minutes?: number
+  recurrence?: SessionRecurrence
+}
+
 // Everything the prompt builder needs to describe the daily-plan request. `days`
 // is the already-resolved window length (the store fills it from computePlanWindow).
 export interface DailyPlanContext {
@@ -197,6 +238,9 @@ export interface DailyPlanContext {
   // Personalization (Phase 9) — filled by the store, not the UI.
   userContext?: AIUserContext
   goalContext?: AIGoalContext
+  // The goal's stored Strategy Brief (Phase 10) — so the daily sessions serve the
+  // strategy's priorities, not just the subgoal in isolation. Spliced in when present.
+  strategyBrief?: StrategyBrief
 }
 
 // One scheduled daily task, ready for the existing addTask path. scheduledDate is
@@ -208,6 +252,74 @@ export interface ScheduledDailyTask {
   description?: string
   scheduledDate: ISODate
   estimatedMinutes: number
+  // Whether this is one occurrence of a recurring habit (true) or a one-time
+  // progression task (false). Sets Task.isRecurring on the written task, which the
+  // UI already surfaces (the Repeat chip in TaskRow).
+  isRecurring: boolean
+}
+
+// ── Feature: strategy brief (Phase 10 — the Direction layer) ─────────────────
+// The durable "coach" output that PRECEDES any task breakdown: a sharpened target,
+// a guiding theme, ranked priorities (what matters most, and why), and captured
+// notes (tradeoffs / constraints / decisions). Generated ONCE per goal from the
+// person + goal context (and, later, a Stage-0 intake conversation) and then
+// STORED, so every downstream generation (structure, schedule, check-in) reads the
+// SAME strategy instead of re-deriving it. This is the spine of the Phase 10
+// pipeline — kept small and text-forward on purpose, because it is fed back into
+// later prompts as a compact context block whose size must stay ~constant no
+// matter how large the roadmap grows. The matching builder/renderer live in
+// engine/ai/prompts/strategyBrief.ts; the tolerant parser in parsers/strategyBrief.ts.
+
+// StrategyBrief / StrategyPriority are the PERSISTED strategy shapes — they hang
+// off GoalContext, so they live in core/types (a persistence type there cannot
+// import from the engine without a cycle). Re-exported here so the AI layer's
+// prompt builder and parser read them from their own vocabulary, exactly like the
+// suggestion features alias AISuggestion.
+export type { StrategyBrief, StrategyPriority } from '@/core/types'
+
+// One question/answer pair from the (future) Stage-0 intake conversation. OPTIONAL
+// input to the brief: when present it sharpens the synthesis; when absent the brief
+// is built from the standing user/goal context alone (so this feature is usable
+// before the intake-chat surface exists).
+export interface IntakeExchange {
+  question: string
+  answer: string
+}
+
+// Everything the intake-question builder needs (Stage 0): describe the goal +
+// person so the model can ask the few highest-leverage, goal-specific questions
+// whose answers most change the plan. No `intake` here — this is what PRODUCES the
+// questions the user then answers into IntakeExchange[]. Plain strings, assembled
+// by the store, so the builder stays pure.
+export interface IntakeQuestionContext {
+  goalTitle: string
+  goalDescription: string
+  // Human-readable category label (e.g. "Education").
+  goalCategory: string
+  // The target date, if any, so questions can probe time pressure.
+  targetDate?: ISODate
+  userContext?: AIUserContext
+  goalContext?: AIGoalContext
+}
+
+// Everything the brief builder needs to describe ONE goal + person to the model.
+// Plain strings + context, NOT entities, so the builder stays pure and unit-testable;
+// the store assembles it (like the other feature contexts).
+export interface StrategyBriefContext {
+  // The goal's id — the store uses it to fetch this goal's intake context; the
+  // prompt builder ignores it (not rendered into the prompt).
+  goalId: ID
+  goalTitle: string
+  goalDescription: string
+  // Human-readable category label (e.g. "Education").
+  goalCategory: string
+  // The target date, if any, so the brief can reason about time pressure.
+  targetDate?: ISODate
+  // Answers gathered in the Stage-0 intake conversation, if any.
+  intake?: IntakeExchange[]
+  // Personalization (Phase 9) — filled by the store, not the UI.
+  userContext?: AIUserContext
+  goalContext?: AIGoalContext
 }
 
 // ── Feature: opportunity discovery (extraction) ──────────────────────────────

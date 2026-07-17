@@ -40,6 +40,9 @@ interface DraftDay {
   description?: string
   scheduledDate: string
   estimatedMinutes: number
+  // A recurring habit occurrence vs a one-time progression task — carried from the
+  // engine so the written task keeps its Task.isRecurring flag.
+  isRecurring: boolean
 }
 
 const inputClass =
@@ -110,6 +113,7 @@ function DailyPlanBody({
             description: t.description,
             scheduledDate: t.scheduledDate,
             estimatedMinutes: t.estimatedMinutes,
+            isRecurring: t.isRecurring,
           })),
         )
         setPhase('ready')
@@ -150,7 +154,7 @@ function DailyPlanBody({
           title: d.title.trim(),
           status: DEFAULT_TASK_STATUS,
           priority: DEFAULT_TASK_PRIORITY,
-          isRecurring: false,
+          isRecurring: d.isRecurring,
           scheduledDate: d.scheduledDate,
           estimatedMinutes: d.estimatedMinutes,
           ...(d.description ? { description: d.description } : {}),

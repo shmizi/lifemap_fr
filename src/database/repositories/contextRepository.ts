@@ -11,7 +11,7 @@
 // row per goal (keyed by goalId, upsert), so a goal's intake is a direct lookup.
 
 import { db } from '../db';
-import type { UserContext, GoalContext, ID } from '@/core/types';
+import type { UserContext, GoalContext, StrategyBrief, ID } from '@/core/types';
 
 // The fixed primary key of the single userContext row (mirrors PROFILE_ID).
 export const USER_CONTEXT_ID = 'me';
@@ -72,6 +72,47 @@ export async function saveGoalContext(
   const existing = await db.goalContext.get(input.goalId);
   const context: GoalContext = {
     ...input,
+    // The strategy brief is written via saveStrategyBrief, NOT the intake form, so
+    // an intake save must never wipe an already-generated brief: keep the existing
+    // one unless this input explicitly carries a newer one.
+    strategyBrief: input.strategyBrief ?? existing?.strategyBrief,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  };
+  await db.goalContext.put(context);
+  return context;
+}
+
+/**
+ * Read one goal's generated Strategy Brief, or undefined if none exists yet.
+ * A thin accessor over the goalContext row so the store/UI need not know the brief
+ * is stored alongside the intake.
+ */
+export async function getStrategyBrief(
+  goalId: ID,
+): Promise<StrategyBrief | undefined> {
+  const existing = await db.goalContext.get(goalId);
+  return existing?.strategyBrief;
+}
+
+/**
+ * Write a goal's Strategy Brief onto its goalContext row, PRESERVING any intake
+ * fields already there (read-modify-write, not a blind replace). If the goal has
+ * no context row yet, one is created with a soft-deadline default (the app's
+ * non-hard default) so the brief has a home. createdAt preserved, updatedAt
+ * refreshed — same per-entity timestamp contract as the rest of this repo.
+ */
+export async function saveStrategyBrief(
+  goalId: ID,
+  brief: StrategyBrief,
+): Promise<GoalContext> {
+  const now = new Date().toISOString();
+  const existing = await db.goalContext.get(goalId);
+  const context: GoalContext = {
+    goalId,
+    deadlineHardness: 'soft',
+    ...existing,
+    strategyBrief: brief,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };

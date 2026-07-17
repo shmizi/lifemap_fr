@@ -153,4 +153,52 @@ describe('context flows into the feature prompts', () => {
     expect(text).not.toContain('About the person')
     expect(text).not.toContain('deadline')
   })
+
+  it('splices the strategy brief into all three roadmap prompts (Phase 10)', () => {
+    const strategyBrief = {
+      sharpenedTarget: 'Reach B2 German before the RWTH deadline',
+      theme: '',
+      priorities: [{ title: 'Speaking practice', rationale: 'weakest area' }],
+      notes: [],
+    }
+
+    const sub = buildSubgoalPrompt({
+      goalId: 'g1',
+      goalTitle: 'X',
+      goalDescription: '',
+      goalCategory: 'Education',
+      strategyBrief,
+    }).messages[0].content
+    expect(sub).toContain('Strategy — target: Reach B2 German')
+
+    const mile = buildMilestonePrompt({
+      goalId: 'g1',
+      goalTitle: 'X',
+      subgoalTitle: 'Y',
+      subgoalDescription: '',
+      strategyBrief,
+    }).messages[0].content
+    expect(mile).toContain('Strategy — target: Reach B2 German')
+
+    const daily = buildDailyPlanPrompt({
+      subgoalTitle: 'Y',
+      subgoalDescription: '',
+      goalTitle: 'X',
+      dailyMinutes: 30,
+      days: 7,
+      strategyBrief,
+    }).messages[0].content
+    expect(daily).toContain('Strategy — target: Reach B2 German')
+    expect(daily).toContain('1. Speaking practice — weakest area')
+  })
+
+  it('omits strategy lines when no brief is provided', () => {
+    const text = buildSubgoalPrompt({
+      goalId: 'g1',
+      goalTitle: 'X',
+      goalDescription: '',
+      goalCategory: 'Education',
+    }).messages[0].content
+    expect(text).not.toContain('Strategy —')
+  })
 })

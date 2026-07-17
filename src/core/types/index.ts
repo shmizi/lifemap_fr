@@ -170,6 +170,32 @@ export interface UserContext {
   updatedAt: ISODate;
 }
 
+// One ranked priority inside a StrategyBrief: what to focus on, and the one-line
+// reason it earns its rank.
+export interface StrategyPriority {
+  title: string;
+  rationale: string;
+}
+
+// The durable "Direction-layer" output for a goal (Phase 10): the coach's read on
+// what the real target is and what matters most, produced BEFORE any task
+// breakdown and then stored so every later generation plans against the SAME
+// strategy. Lives here (core/types) rather than in engine/ai because it is
+// PERSISTED — it hangs off GoalContext below. Kept small and text-forward on
+// purpose: it is fed back into later prompts as a compact context block, so its
+// size must stay ~constant no matter how large the roadmap grows. The pure prompt
+// builder / parser that produce it live in engine/ai (which re-exports this type).
+export interface StrategyBrief {
+  // A crisp one-sentence restatement of the real target (may sharpen a vague goal).
+  sharpenedTarget: string;
+  // The guiding narrative/identity that ties the work together; '' when none fits.
+  theme: string;
+  // What matters most, most-important first. A handful, never a long list.
+  priorities: StrategyPriority[];
+  // Tradeoffs weighed, constraints, and decisions captured — short lines, no prose.
+  notes: string[];
+}
+
 // Per-goal intake — captured when a goal is created, editable when it is edited.
 // One row per goal (goalId is the primary key). This is what makes two people
 // with the SAME goal get DIFFERENT roadmaps: same target, different starting point.
@@ -183,6 +209,10 @@ export interface GoalContext {
   deadlineHardness: DeadlineHardness;
   // Why it matters — also fuels the "why it matters" framing elsewhere.
   motivation?: string;
+  // Phase 10: the goal's generated Strategy Brief (Direction layer). Optional —
+  // absent until it has been generated. Stored on this same per-goal row (no new
+  // table, no index) so a goal's intake and its strategy live together.
+  strategyBrief?: StrategyBrief;
   createdAt: ISODate;
   updatedAt: ISODate;
 }

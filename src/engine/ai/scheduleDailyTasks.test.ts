@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { format } from 'date-fns'
 import {
   scheduleDailyTasks,
+  expandRecurringSessions,
   computePlanWindow,
 } from '@/engine/ai/scheduleDailyTasks'
 import type { AISuggestion } from '@/engine/ai/types'
@@ -40,6 +41,16 @@ describe('scheduleDailyTasks', () => {
     expect(result.every((t) => t.estimatedMinutes === 45)).toBe(true)
   })
 
+  it('uses each session\'s own minutes when present, defaulting the rest', () => {
+    const withMinutes = [
+      { title: 'short', minutes: 15 },
+      { title: 'no estimate' },
+      { title: 'long', minutes: 90 },
+    ]
+    const result = scheduleDailyTasks(withMinutes, start, 30)
+    expect(result.map((t) => t.estimatedMinutes)).toEqual([15, 30, 90])
+  })
+
   it('keeps a description when present and omits it when absent', () => {
     const result = scheduleDailyTasks(sessions, start, 30)
     expect(result[0].description).toBe('warm up')
@@ -48,6 +59,77 @@ describe('scheduleDailyTasks', () => {
 
   it('returns an empty plan for no sessions', () => {
     expect(scheduleDailyTasks([], start, 30)).toEqual([])
+  })
+
+  it('skips days off (start 2026-06-25 is a Thursday; weekend = [0,6])', () => {
+    // Thu 06-25, Fri 06-26, then Sat/Sun skipped -> Mon 06-29.
+    const result = scheduleDailyTasks(sessions, start, 30, [0, 6])
+    expect(result.map((t) => t.scheduledDate)).toEqual([
+      '2026-06-25',
+      '2026-06-26',
+      '2026-06-29',
+    ])
+  })
+
+  it('ignores a degenerate skip of all seven weekdays (never loops forever)', () => {
+    const result = scheduleDailyTasks(sessions, start, 30, [0, 1, 2, 3, 4, 5, 6])
+    expect(result.map((t) => t.scheduledDate)).toEqual([
+      '2026-06-25',
+      '2026-06-26',
+      '2026-06-27',
+    ])
+  })
+})
+
+describe('expandRecurringSessions', () => {
+  const startThu = new Date(2026, 5, 25) // Thu 2026-06-25
+
+  it('lays a habit at its interval across the window, flagged recurring', () => {
+    const out = expandRecurringSessions(
+      [{ title: 'Review', minutes: 15, recurrence: { everyDays: 2 } }],
+      { startDate: startThu, windowDays: 6, defaultMinutes: 30 },
+    )
+    expect(out.map((t) => t.scheduledDate)).toEqual([
+      '2026-06-25',
+      '2026-06-27',
+      '2026-06-29',
+    ])
+    expect(out.every((t) => t.isRecurring)).toBe(true)
+    expect(out.every((t) => t.estimatedMinutes === 15)).toBe(true)
+  })
+
+  it('ignores one-time (non-recurring) sessions', () => {
+    expect(
+      expandRecurringSessions([{ title: 'x' }], {
+        startDate: startThu,
+        windowDays: 7,
+        defaultMinutes: 30,
+      }),
+    ).toEqual([])
+  })
+
+  it('defaults minutes when the session carries none', () => {
+    const out = expandRecurringSessions(
+      [{ title: 'r', recurrence: { everyDays: 7 } }],
+      { startDate: startThu, windowDays: 8, defaultMinutes: 40 },
+    )
+    expect(out[0].estimatedMinutes).toBe(40)
+  })
+
+  it('anchors on the first working day and skips rest-day occurrences', () => {
+    // Start Sat 06-27 (a day off); weekend off -> anchor Mon 06-29; weekly stays
+    // on Monday and never lands on the weekend.
+    const startSat = new Date(2026, 5, 27)
+    const out = expandRecurringSessions(
+      [{ title: 'Weekly', recurrence: { everyDays: 7 } }],
+      {
+        startDate: startSat,
+        windowDays: 14,
+        defaultMinutes: 30,
+        skipWeekdays: [0, 6],
+      },
+    )
+    expect(out.map((t) => t.scheduledDate)).toEqual(['2026-06-29', '2026-07-06'])
   })
 })
 

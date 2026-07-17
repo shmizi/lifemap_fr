@@ -17,7 +17,13 @@ import {
   CalendarClock,
 } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
-import type { Dependency, ID, MilestoneStatus, SubgoalTree } from '@/core/types'
+import type {
+  Dependency,
+  ID,
+  MilestoneStatus,
+  SubgoalTree,
+  Task,
+} from '@/core/types'
 import { SUBGOAL_STATUS_LABELS, DEFAULT_DAILY_MINUTES } from '@/core/constants'
 import { useGoalStore } from '@/store/useGoalStore'
 import { RowActions } from '@/components/ui/RowActions'
@@ -121,6 +127,13 @@ export function SubgoalSection({
     looseTasks.length + milestones.reduce((sum, m) => sum + m.tasks.length, 0)
   const isEmpty = milestoneCount === 0 && looseTasks.length === 0
 
+  // When collapsed, still surface the single most-urgent open task so "what's next"
+  // stays visible without expanding. Computed across loose + milestone tasks.
+  const nextTask = pickNextTask([
+    ...looseTasks,
+    ...milestones.flatMap((m) => m.tasks),
+  ])
+
   // Whether this subgoal is either end of any dependency edge — if so, deleting
   // it also removes those edges (handled atomically in the repository), so the
   // delete confirmation says so.
@@ -180,6 +193,17 @@ export function SubgoalSection({
           }
         />
       </div>
+
+      {/* Collapsed peek: the nearest-due open task stays in view so you can act on
+          it (or tick it off) without expanding the whole subgoal. */}
+      {!expanded && nextTask ? (
+        <div className="border-t border-app-border px-4 py-2">
+          <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-app-text-muted">
+            Next up
+          </p>
+          <TaskRow task={nextTask} />
+        </div>
+      ) : null}
 
       {expanded ? (
         <div className="space-y-3 border-t border-app-border p-4">
@@ -315,4 +339,15 @@ export function SubgoalSection({
       />
     </div>
   )
+}
+
+// The one open task to preview when a subgoal is collapsed: the incomplete task
+// with the earliest effective date (scheduledDate, else dueDate). Undated tasks
+// sort last; ties keep input order. Returns undefined when nothing is open.
+function pickNextTask(tasks: Task[]): Task | undefined {
+  const open = tasks.filter((t) => t.status !== 'completed')
+  if (open.length === 0) return undefined
+  const dateOf = (t: Task): string =>
+    t.scheduledDate ?? t.dueDate ?? '9999-99-99'
+  return open.reduce((best, t) => (dateOf(t) < dateOf(best) ? t : best))
 }

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { buildDailyPlanPrompt } from '@/engine/ai/prompts/dailyPlan'
 import { parseSuggestionList } from '@/engine/ai/parsers/suggestionList'
+import { parsePlannedSessions } from '@/engine/ai/parsers/plannedSessions'
 import { scheduleDailyTasks } from '@/engine/ai/scheduleDailyTasks'
 import { MockAI } from '@/services/ai/MockAI'
 import type { DailyPlanContext } from '@/engine/ai/types'
@@ -36,6 +37,27 @@ describe('buildDailyPlanPrompt', () => {
     expect(buildDailyPlanPrompt(base).system).toContain('JSON array')
   })
 
+  it('asks the model to size each session with a minutes estimate', () => {
+    const system = buildDailyPlanPrompt(base).system
+    expect(system).toContain('minutes')
+    // The output shape must include the numeric minutes field.
+    expect(system).toContain('"minutes": number')
+  })
+
+  it('invites the model to mark maintenance sessions recurring', () => {
+    const system = buildDailyPlanPrompt(base).system
+    expect(system).toContain('recurrence')
+    expect(system).toContain('everyDays')
+  })
+
+  it('tells the model to use recurrence sparingly and not daily', () => {
+    // Guards against the observed over-use (a plan dumping dozens of daily
+    // recurring occurrences): the prompt must cap the count and steer off daily.
+    const system = buildDailyPlanPrompt(base).system
+    expect(system).toContain('at most one or two')
+    expect(system).toContain('not daily')
+  })
+
   it('omits the description line when the subgoal description is blank', () => {
     expect(userText({ ...base, subgoalDescription: '  ' })).not.toContain(
       'Subgoal description:',
@@ -56,5 +78,26 @@ describe('MockAI daily-plan round trip', () => {
     expect(plan.every((t) => t.estimatedMinutes === 30)).toBe(true)
     // The mock names the subgoal in each session description.
     expect(plan[0].description).toContain('Get German to B2')
+  })
+
+  it('carries the model-decided per-session minutes through the scheduler', () => {
+    // Same path but via parsePlannedSessions, which KEEPS the mock's varying
+    // minutes — so scheduled tasks reflect real per-session durations, not a
+    // single flat estimate.
+    const request = buildDailyPlanPrompt({ ...base, days: 4 })
+    return new MockAI().complete(request).then((response) => {
+      const sessions = parsePlannedSessions(response, 4)
+      const plan = scheduleDailyTasks(sessions, new Date(2026, 5, 25), 30)
+      // MOCK_SESSION_MINUTES cycles [20, 30, 45, 30].
+      expect(plan.map((t) => t.estimatedMinutes)).toEqual([20, 30, 45, 30])
+    })
+  })
+
+  it('emits at least one recurring session for the overlay path', () => {
+    const request = buildDailyPlanPrompt({ ...base, days: 4 })
+    return new MockAI().complete(request).then((response) => {
+      const sessions = parsePlannedSessions(response, 4)
+      expect(sessions.some((s) => s.recurrence !== undefined)).toBe(true)
+    })
   })
 })

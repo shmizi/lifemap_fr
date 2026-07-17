@@ -106,6 +106,34 @@ export function GoalCard({ goal }: GoalCardProps) {
           </p>
         ) : null}
 
+        {/* "Delayed, and by how much" — the projected finish at the current pace
+            and how far it overshoots the target. Shown only when the pace badge is
+            already at_risk/behind (so the two never contradict). A hard deadline is
+            phrased as "speed up" (its date can't move); a soft one is informational. */}
+        {health &&
+        !isFinished &&
+        (health.status === 'at_risk' || health.status === 'behind') &&
+        health.projection.daysBehind > 0 &&
+        health.projection.projectedDate ? (
+          <p
+            className={`mt-3 text-xs ${
+              health.deadlineHardness === 'hard'
+                ? 'text-red-600'
+                : 'text-amber-600'
+            }`}
+          >
+            {health.deadlineHardness === 'hard'
+              ? `Hard deadline — about ${health.projection.daysBehind} days behind. At this pace you'll finish ${format(
+                  parseISO(health.projection.projectedDate),
+                  'd MMM yyyy',
+                )}; increase your pace to hit the target.`
+              : `About ${health.projection.daysBehind} days behind — at this pace you'll finish ${format(
+                  parseISO(health.projection.projectedDate),
+                  'd MMM yyyy',
+                )}.`}
+          </p>
+        ) : null}
+
         {/* Right padding leaves room for the delete control in this row. The
             ring sits beside the target date so momentum and deadline read
             together; it is hidden for a goal with no tasks. */}

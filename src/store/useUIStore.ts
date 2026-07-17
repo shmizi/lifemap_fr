@@ -8,10 +8,14 @@ import { persist } from 'zustand/middleware'
 interface UIState {
   sidebarOpen: boolean
   theme: 'light' | 'dark'
+  // Whether in-app task reminders are on (device preference; the actual OS
+  // permission is separate and asked for when the user enables this).
+  remindersEnabled: boolean
   // Actions
   setSidebarOpen: (open: boolean) => void
   toggleSidebar: () => void
   toggleTheme: () => void
+  setRemindersEnabled: (enabled: boolean) => void
 }
 
 export const useUIStore = create<UIState>()(
@@ -19,15 +23,20 @@ export const useUIStore = create<UIState>()(
     (set) => ({
       sidebarOpen: true,
       theme: 'light',
+      remindersEnabled: false,
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
       toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
       toggleTheme: () =>
         set((state) => ({ theme: state.theme === 'light' ? 'dark' : 'light' })),
+      setRemindersEnabled: (enabled) => set({ remindersEnabled: enabled }),
     }),
     {
       name: 'lifemap-ui-storage',
-      // Only persist theme — sidebar should always start open
-      partialize: (state) => ({ theme: state.theme }),
+      // Persist device preferences (theme + reminders); sidebar always starts open.
+      partialize: (state) => ({
+        theme: state.theme,
+        remindersEnabled: state.remindersEnabled,
+      }),
     }
   )
 )

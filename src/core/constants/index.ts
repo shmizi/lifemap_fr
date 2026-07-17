@@ -79,6 +79,25 @@ export const DEFAULT_DAILY_MINUTES = 30;
 // constants (not the engine) so the UI can read it without importing engine/.
 export const DAILY_PLAN_HORIZON = 14;
 
+// Hard ceiling on how many sessions in one daily plan may be RECURRING habits
+// (materialized as dated occurrences across the window). Recurrence is meant to
+// be rare — a maintenance rhythm alongside the one-time progression backbone —
+// so even if the model over-marks sessions recurring (observed: a single plan
+// dumping dozens of daily-recurring occurrences), the store keeps only the first
+// few. A defensive backstop to the prompt's "use it sparingly" guidance.
+export const MAX_RECURRING_SESSIONS = 2;
+
+// When a consistency subgoal has fewer than this many days of scheduled tasks
+// still ahead of today, the rolling window is "running low" and the auto top-up
+// (useGoalStore.topUpRoadmap) extends it by another horizon. Small enough that a
+// freshly generated plan (a full horizon ahead) never triggers it.
+export const DAILY_PLAN_LOW_WINDOW = 5;
+
+// Times of day (local hours, 24h) at which in-app task reminders fire while the
+// app is open — a morning / afternoon / evening nudge. Each slot fires at most
+// once per day (see useTaskReminders).
+export const REMINDER_SLOTS: readonly number[] = [9, 14, 19];
+
 // A new milestone defaults to 'active' (available to work on). 'locked' is
 // PARKED, not used: Phase 3 dependencies are SOFT (they strengthen, they do not
 // block), so nothing hard-locks a milestone today and no code sets this status.

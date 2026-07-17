@@ -13,7 +13,7 @@
 // in later phases.
 
 import { create } from 'zustand'
-import { format, addDays } from 'date-fns'
+import { format, addDays, differenceInCalendarDays, parseISO } from 'date-fns'
 import type {
   Goal,
   Subgoal,
@@ -22,6 +22,8 @@ import type {
   GoalTree,
   TaskLineage,
   Dependency,
+  DeadlineHardness,
+  StrategyBrief,
   ID,
 } from '@/core/types'
 import { computeEffortMomentum } from '@/engine/progress/computeEffortMomentum'
@@ -39,6 +41,10 @@ import {
   type GoalHealth,
 } from '@/engine/health/computeGoalHealth'
 import { computeLaggingFoundation } from '@/engine/health/computeLaggingFoundation'
+import {
+  computeGoalProjection,
+  type GoalProjection,
+} from '@/engine/health/computeGoalProjection'
 import { isMilestoneComplete } from '@/engine/progress/isMilestoneComplete'
 import { rankTasks, DEFAULT_TOP_N } from '@/engine/priority/rankTasks'
 import { computeActiveSupportCounts } from '@/engine/priority/dependencyBoost'
@@ -54,11 +60,24 @@ import { parseMilestoneSuggestions } from '@/engine/ai/parsers/milestones'
 import { buildSubgoalPrompt } from '@/engine/ai/prompts/subgoals'
 import { parseSubgoalSuggestions } from '@/engine/ai/parsers/subgoals'
 import { buildDailyPlanPrompt } from '@/engine/ai/prompts/dailyPlan'
-import { parseSuggestionList } from '@/engine/ai/parsers/suggestionList'
+import { buildStrategyBriefPrompt } from '@/engine/ai/prompts/strategyBrief'
+import {
+  buildIntakePrompt,
+  MAX_INTAKE_QUESTIONS,
+} from '@/engine/ai/prompts/intake'
+import { parsePlannedSessions } from '@/engine/ai/parsers/plannedSessions'
+import { parseStrategyBrief } from '@/engine/ai/parsers/strategyBrief'
+import { parseIntakeQuestions } from '@/engine/ai/parsers/intake'
 import {
   scheduleDailyTasks,
+  expandRecurringSessions,
   computePlanWindow,
 } from '@/engine/ai/scheduleDailyTasks'
+import {
+  packSessionsIntoDays,
+  type PackSession,
+} from '@/engine/ai/packSessionsIntoDays'
+import { rescheduleOverdue } from '@/engine/ai/rescheduleOverdue'
 import type {
   MilestoneSuggestion,
   MilestoneSuggestionContext,
@@ -68,12 +87,16 @@ import type {
   ScheduledDailyTask,
   AIUserContext,
   AIGoalContext,
+  PlannedSession,
+  IntakeExchange,
 } from '@/engine/ai/types'
 import { aiProvider } from '@/services/ai'
 import {
   DAILY_PLAN_HORIZON,
+  DAILY_PLAN_LOW_WINDOW,
+  MAX_RECURRING_SESSIONS,
+  DEFAULT_DAILY_MINUTES,
   DEFAULT_SUBGOAL_STATUS,
-  DEFAULT_MILESTONE_STATUS,
   DEFAULT_TASK_STATUS,
   DEFAULT_TASK_PRIORITY,
   LIFE_SITUATION_OPTIONS,
@@ -112,6 +135,8 @@ import {
   deleteGoalContext,
   getUserContext,
   getGoalContext,
+  saveStrategyBrief,
+  getStrategyBrief,
   getProfile,
 } from '@/database/repositories'
 
@@ -180,6 +205,13 @@ export interface LaggingFoundationNote {
 }
 export type GoalHealthView = GoalHealth & {
   laggingFoundation: LaggingFoundationNote | null
+  // Phase 9: a concrete "delayed, and by how much" read — the projected finish
+  // date at the current pace and the days it overshoots the target. A SEPARATE
+  // field from the pace status, never blended. `deadlineHardness` (from the goal's
+  // intake context) lets the card phrase a hard deadline as "must speed up" and
+  // never as "move the date".
+  projection: GoalProjection
+  deadlineHardness: DeadlineHardness | null
 }
 
 // ── Roadmap view-model (Phase 4) ─────────────────────────────────────────────
@@ -428,6 +460,37 @@ interface GoalState {
     request: DailyPlanRequest,
   ) => Promise<ScheduledDailyTask[]>
 
+  // Phase 10 — the goal's stored Strategy Brief for the Detail View. Single slot,
+  // one goal at a time (like currentGoalTree / currentRoadmap): loadStrategyBrief
+  // blanks then reads the persisted brief; generateStrategyBrief refreshes it on
+  // success. null means "no brief generated yet for this goal".
+  currentStrategyBrief: StrategyBrief | null
+  isLoadingStrategyBrief: boolean
+  loadStrategyBrief: (goalId: ID) => Promise<void>
+
+  // Phase 10 — the Direction layer. Generate (and persist) a goal's Strategy
+  // Brief: the coach's read on the real target + what matters most, produced
+  // BEFORE any task breakdown from the person + goal context. READ-shaped like the
+  // other AI actions (build prompt -> provider -> pure parser), but this one WRITES
+  // its result to the goal's context row (saveStrategyBrief) because the brief is
+  // durable — every later generation reads it. Propagate-on-failure (a provider
+  // error bubbles to the caller, like suggestMilestones); a malformed reply parses
+  // to null, in which case nothing is written and null is returned (the existing
+  // brief, if any, is left untouched). `intake` (Stage-0 answers) is optional: when
+  // provided the brief is built from a real conversation; when omitted it falls
+  // back to the standing user/goal context alone.
+  generateStrategyBrief: (
+    goalId: ID,
+    intake?: IntakeExchange[],
+  ) => Promise<StrategyBrief | null>
+
+  // Phase 10, Stage 0 — the intake conversation's questions. Ask the provider for
+  // the few highest-leverage, goal-specific questions to put to the user; their
+  // answers feed generateStrategyBrief. READ-ONLY (no writes); propagate-on-failure
+  // like the suggest* actions; a malformed reply parses to [] (the user can still
+  // generate a brief from context alone).
+  generateIntakeQuestions: (goalId: ID) => Promise<string[]>
+
   // Autonomous roadmap generation: from a goal, produce the WHOLE plan in one
   // action — subgoals (if the goal has none yet), then for each subgoal its
   // milestones and a dated run of daily tasks. Orchestrates the three existing AI
@@ -435,6 +498,24 @@ interface GoalState {
   // accept step) so "type a goal, get a full actionable roadmap" is one click.
   // Skips any level that already has data, so it can also fill in an existing goal.
   generateFullRoadmap: (goalId: ID) => Promise<void>
+
+  // Auto top-up of the rolling task window: for each consistency subgoal whose
+  // scheduled tasks are running low (fewer than DAILY_PLAN_LOW_WINDOW days still
+  // ahead of today), generate and write the next batch — so a long-running goal's
+  // daily plan extends itself instead of quietly running dry. Cheap when nothing
+  // is low (it only reads dates); fires AI only for subgoals that need it. Meant
+  // to be called best-effort on goal load. Subgoals never yet planned are left
+  // alone (explicit generation seeds them first).
+  topUpRoadmap: (goalId: ID) => Promise<void>
+
+  // Reschedule-on-miss (Phase 10 scheduler). Pull this goal's overdue (missed,
+  // incomplete, past-dated) tasks forward onto upcoming working days at the user's
+  // daily capacity, so missed work returns to the calendar instead of piling up in
+  // the past. Branches on the goal's deadline hardness: a HARD deadline caps the
+  // window at the target (overflow compresses onto the last day, never slips past);
+  // a soft deadline spreads freely. Returns how many tasks were moved (0 = none
+  // overdue). Refreshes the tree/dashboard/cross-goal caches like a task mutation.
+  rescheduleOverdueForGoal: (goalId: ID) => Promise<number>
 
   // --- cross-cutting error state ---
   // A single, calm, NON-FATAL message set when a background load or post-write
@@ -572,9 +653,13 @@ export const useGoalStore = create<GoalState>()((set, get) => {
     // goal in parallel. Used to compute per-subgoal completion and to resolve the
     // lagging-foundation note's titles. Cheap at this scale; same per-goal fan-out
     // pattern as gatherGoalsWithTasks.
-    const subgoalsPerGoal = await Promise.all(
-      goalsWithTasks.map((g) => getSubgoalsByGoalId(g.goal.id)),
-    )
+    // Per-goal subgoals (for the lagging-foundation signal) AND per-goal intake
+    // context (for the deadline-hardness framing on the projection), fetched in
+    // parallel. Both are cheap per-goal fan-outs at this scale.
+    const [subgoalsPerGoal, goalContexts] = await Promise.all([
+      Promise.all(goalsWithTasks.map((g) => getSubgoalsByGoalId(g.goal.id))),
+      Promise.all(goalsWithTasks.map((g) => getGoalContext(g.goal.id))),
+    ])
 
     // One `now` for the whole list so every goal's health is judged against the
     // same moment. Completion is computed once per goal and reused for health.
@@ -611,7 +696,21 @@ export const useGoalStore = create<GoalState>()((set, get) => {
           }
         : null
 
-      const health: GoalHealthView = { ...pace, laggingFoundation }
+      // Phase 9: concrete finish projection + the goal's deadline hardness.
+      const projection = computeGoalProjection(
+        g.goal.createdAt,
+        g.goal.targetDate,
+        progress,
+        now,
+      )
+      const deadlineHardness = goalContexts[i]?.deadlineHardness ?? null
+
+      const health: GoalHealthView = {
+        ...pace,
+        laggingFoundation,
+        projection,
+        deadlineHardness,
+      }
       return { goal: g.goal, progress, health }
     })
     set({
@@ -1239,12 +1338,13 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       // Phase 9: enrich the prompt with who the user is and where they stand on
       // the parent goal, so suggestions are tailored. Fetched store-side; the
       // engine prompt builder stays pure.
-      const [userContext, goalContext] = await Promise.all([
+      const [userContext, goalContext, strategyBrief] = await Promise.all([
         loadAIUserContext(),
         loadAIGoalContext(context.goalId),
+        getStrategyBrief(context.goalId),
       ])
       const response = await aiProvider.complete(
-        buildMilestonePrompt({ ...context, userContext, goalContext }),
+        buildMilestonePrompt({ ...context, userContext, goalContext, strategyBrief }),
       )
       return parseMilestoneSuggestions(response)
     },
@@ -1253,12 +1353,13 @@ export const useGoalStore = create<GoalState>()((set, get) => {
     // thin orchestration (pure prompt -> provider -> pure parser), same
     // propagate-on-failure contract.
     suggestSubgoals: async (context) => {
-      const [userContext, goalContext] = await Promise.all([
+      const [userContext, goalContext, strategyBrief] = await Promise.all([
         loadAIUserContext(),
         loadAIGoalContext(context.goalId),
+        getStrategyBrief(context.goalId),
       ])
       const response = await aiProvider.complete(
-        buildSubgoalPrompt({ ...context, userContext, goalContext }),
+        buildSubgoalPrompt({ ...context, userContext, goalContext, strategyBrief }),
       )
       return parseSubgoalSuggestions(response)
     },
@@ -1289,11 +1390,16 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       if (days <= 0) return [] // already planned through the deadline
 
       // Phase 9: tailor the plan to the person + goal. Fetched only after the
-      // early-out above, so a no-op regenerate does no extra reads.
-      const [userContext, goalContext] = await Promise.all([
-        loadAIUserContext(),
-        loadAIGoalContext(request.goalId),
-      ])
+      // early-out above, so a no-op regenerate does no extra reads. The RAW
+      // context also gives the days-off indices the scheduler uses to avoid
+      // placing tasks on rest days (capacity: don't work on days off).
+      const [userContext, goalContext, rawContext, strategyBrief] =
+        await Promise.all([
+          loadAIUserContext(),
+          loadAIGoalContext(request.goalId),
+          getUserContext(),
+          getStrategyBrief(request.goalId),
+        ])
       const response = await aiProvider.complete(
         buildDailyPlanPrompt({
           subgoalTitle: request.subgoalTitle,
@@ -1303,48 +1409,157 @@ export const useGoalStore = create<GoalState>()((set, get) => {
           days,
           userContext,
           goalContext,
+          strategyBrief,
         }),
       )
-      const sessions = parseSuggestionList(response, days)
-      return scheduleDailyTasks(sessions, startDate, request.dailyMinutes)
+      // Sessions carry the model's own per-session minutes. Split them: one-time
+      // PROGRESSION sessions form the day-by-day backbone (scheduleDailyTasks), while
+      // RECURRING habits are overlaid across the same window at their cadence
+      // (expandRecurringSessions). Both fall back to request.dailyMinutes for minutes.
+      const sessions = parsePlannedSessions(response, days)
+      const lightDays = rawContext?.lightDays ?? []
+      const backbone = scheduleDailyTasks(
+        sessions.filter((s) => !s.recurrence),
+        startDate,
+        request.dailyMinutes,
+        lightDays,
+      )
+      // Cap recurring habits: even if the model over-marks sessions recurring, keep
+      // only the first few so one plan can't dump dozens of daily occurrences
+      // (MAX_RECURRING_SESSIONS). Order preserved, so the earliest habits survive.
+      const habits = expandRecurringSessions(
+        sessions.filter((s) => s.recurrence).slice(0, MAX_RECURRING_SESSIONS),
+        {
+          startDate,
+          windowDays: days,
+          defaultMinutes: request.dailyMinutes,
+          skipWeekdays: lightDays,
+        },
+      )
+      return [...backbone, ...habits]
     },
 
-    // Build the whole roadmap from a goal in one go. Reuses the three AI actions
-    // above + the existing add* write paths (each of which refreshes the open
-    // tree), so the user watches subgoals, milestones, and dated tasks fill in.
+    // --- strategy brief (read slot) ---
+    currentStrategyBrief: null,
+    isLoadingStrategyBrief: false,
+
+    // Blank the slot first (avoids a previous goal's brief flashing when navigating
+    // between detail pages), then read the persisted brief. Mirrors loadGoalTree.
+    loadStrategyBrief: async (goalId) => {
+      set({ isLoadingStrategyBrief: true, currentStrategyBrief: null })
+      try {
+        const brief = (await getStrategyBrief(goalId)) ?? null
+        set({ currentStrategyBrief: brief, error: null })
+      } catch {
+        set({ error: LOAD_ERROR_MESSAGE })
+      } finally {
+        set({ isLoadingStrategyBrief: false })
+      }
+    },
+
+    // Phase 10 — Direction layer. Fetch the goal + the person/goal context, ask
+    // the provider for a brief, parse it (never throws), and persist it on success.
+    // Standalone for now: the downstream structure/schedule stages will render the
+    // stored brief into their prompts in a later slice. `new Date()` isn't read
+    // here — the brief carries no dates. Uses getGoalTree only to reach the goal's
+    // fields (same pattern as generateFullRoadmap).
+    generateStrategyBrief: async (goalId, intake) => {
+      const tree = await getGoalTree(goalId)
+      if (!tree) return null
+      const goal = tree.goal
+
+      const [userContext, goalContext] = await Promise.all([
+        loadAIUserContext(),
+        loadAIGoalContext(goalId),
+      ])
+      const response = await aiProvider.complete(
+        buildStrategyBriefPrompt({
+          goalId,
+          goalTitle: goal.title,
+          goalDescription: goal.description,
+          goalCategory: goal.category,
+          targetDate: goal.targetDate,
+          intake,
+          userContext,
+          goalContext,
+        }),
+      )
+      const brief = parseStrategyBrief(response)
+      // Only persist a usable brief; a null (malformed reply) leaves any existing
+      // brief in place rather than clobbering it with nothing. On success, refresh
+      // the read slot so the Detail View reflects the new brief immediately.
+      if (brief) {
+        await saveStrategyBrief(goalId, brief)
+        set({ currentStrategyBrief: brief })
+      }
+      return brief
+    },
+
+    // Stage 0 — the intake questions. Same thin orchestration as the suggest*
+    // actions (fetch goal + context, build prompt, provider, pure parser). Reads
+    // the goal's fields via getGoalTree (like generateStrategyBrief), so the caller
+    // needs only the goalId.
+    generateIntakeQuestions: async (goalId) => {
+      const tree = await getGoalTree(goalId)
+      if (!tree) return []
+      const goal = tree.goal
+
+      const [userContext, goalContext] = await Promise.all([
+        loadAIUserContext(),
+        loadAIGoalContext(goalId),
+      ])
+      const response = await aiProvider.complete(
+        buildIntakePrompt({
+          goalTitle: goal.title,
+          goalDescription: goal.description,
+          goalCategory: goal.category,
+          targetDate: goal.targetDate,
+          userContext,
+          goalContext,
+        }),
+      )
+      return parseIntakeQuestions(response, MAX_INTAKE_QUESTIONS)
+    },
+
+    // Build the whole roadmap from a goal in one go: subgoals (if none yet), then
+    // a dated daily plan under each. Reuses the AI actions + the existing add*
+    // write paths (each refreshes the open tree), so the user watches it fill in.
     // Sequential by necessity: order is max(siblings)+1 in the writes, and each
-    // subgoal's id is needed before its children can be created.
+    // subgoal's id is needed before its tasks can be created. Milestones are
+    // deliberately NOT auto-created — an empty milestone (no tasks under it) only
+    // clutters the view; the tasks are the actionable layer. Users who want
+    // checkpoints can still add them per-subgoal via "Suggest milestones".
     generateFullRoadmap: async (goalId) => {
       const tree = await getGoalTree(goalId)
       if (!tree) return
       const goal = tree.goal
 
-      // Capacity: split the user's available daily time across the subgoals, so
-      // the generated daily tasks across ALL subgoals stay within what they said
-      // they can do in a day (rather than each subgoal blindly claiming a full
-      // session). A simple even split — the full day-packer is a later refinement.
+      // Capacity budget: the user's available minutes in a day. The pure day-packer
+      // (below) fills each working day up to this across ALL subgoals, so the whole
+      // day's generated work never exceeds what they said they can actually do.
       const profile = await getProfile()
       const dayMinutes = (profile?.availableHoursPerDay ?? 4) * 60
-      const minutesPerSubgoal = (count: number): number =>
-        Math.max(15, Math.round(dayMinutes / Math.max(1, count)))
 
       // Existing structure (so a re-run fills gaps instead of duplicating).
       type Sg = {
         id: ID
         title: string
         description: string
-        hasMilestones: boolean
         hasTasks: boolean
       }
       let subgoals: Sg[] = tree.subgoals.map((st) => ({
         id: st.subgoal.id,
         title: st.subgoal.title,
         description: st.subgoal.description,
-        hasMilestones: st.milestones.length > 0,
         hasTasks:
           st.looseTasks.length > 0 ||
           st.milestones.some((m) => m.tasks.length > 0),
       }))
+
+      // Subgoals this run creates itself (as opposed to ones the user made by
+      // hand). Only these are eligible for the empty-subgoal prune at the end —
+      // we never delete a subgoal a person authored, even if it ends up task-less.
+      const createdIds = new Set<ID>()
 
       // 1) Subgoals — only when the goal has none yet.
       if (subgoals.length === 0) {
@@ -1355,7 +1570,6 @@ export const useGoalStore = create<GoalState>()((set, get) => {
           goalCategory: goal.category,
           existingSubgoalTitles: [],
         })
-        const perDay = minutesPerSubgoal(suggestions.length)
         const created: Sg[] = []
         for (const s of suggestions) {
           const sg = await get().addSubgoal({
@@ -1364,65 +1578,230 @@ export const useGoalStore = create<GoalState>()((set, get) => {
             description: s.description ?? '',
             status: DEFAULT_SUBGOAL_STATUS,
             requiresConsistency: true,
-            estimatedDailyMinutes: perDay,
+            estimatedDailyMinutes: DEFAULT_DAILY_MINUTES,
           })
           created.push({
             id: sg.id,
             title: sg.title,
             description: sg.description,
-            hasMilestones: false,
             hasTasks: false,
           })
+          createdIds.add(sg.id)
         }
         subgoals = created
       }
 
-      // 2) Per subgoal: milestones (if none) + a dated daily plan (if no tasks).
-      // Each subgoal's daily session is capped to its share of the day's minutes.
-      const perSubgoalMinutes = minutesPerSubgoal(subgoals.length)
-      for (const sg of subgoals) {
-        if (!sg.hasMilestones) {
-          const milestones = await get().suggestMilestones({
-            goalId,
-            goalTitle: goal.title,
-            subgoalTitle: sg.title,
-            subgoalDescription: sg.description,
-            existingMilestoneTitles: [],
+      // 2) Tasks — ONE packed schedule across every subgoal that still needs them.
+      // Ask each subgoal for an undated session list, interleave them round-robin
+      // (so a day mixes subjects), then the pure packer fills each working day up
+      // to the daily budget and skips days off. THIS is the capacity guarantee:
+      // the whole day's work across subgoals never exceeds availableHoursPerDay.
+      const pending = subgoals.filter((sg) => !sg.hasTasks)
+      if (pending.length > 0) {
+        // Context is per-user / per-goal — fetch once and reuse for every subgoal.
+        // The Strategy Brief (Phase 10) is included so every subgoal's daily plan
+        // pulls toward the same target/priorities, not just its own title.
+        const [userContext, goalContext, rawContext, strategyBrief] =
+          await Promise.all([
+            loadAIUserContext(),
+            loadAIGoalContext(goalId),
+            getUserContext(),
+            getStrategyBrief(goalId),
+          ])
+
+        // The model decides WHAT each session is AND how long it takes; the packer
+        // decides WHEN. `dailyMinutes` is only a sizing hint — each session carries
+        // its own model-decided minutes (falling back to DEFAULT_DAILY_MINUTES).
+        const perSubgoal: { subgoalId: ID; sessions: PlannedSession[] }[] = []
+        for (const sg of pending) {
+          const response = await aiProvider.complete(
+            buildDailyPlanPrompt({
+              subgoalTitle: sg.title,
+              subgoalDescription: sg.description,
+              goalTitle: goal.title,
+              dailyMinutes: DEFAULT_DAILY_MINUTES,
+              days: DAILY_PLAN_HORIZON,
+              userContext,
+              goalContext,
+              strategyBrief,
+            }),
+          )
+          perSubgoal.push({
+            subgoalId: sg.id,
+            sessions: parsePlannedSessions(response, DAILY_PLAN_HORIZON),
           })
-          for (const m of milestones) {
-            await get().addMilestone({
-              subgoalId: sg.id,
-              title: m.title,
-              status: DEFAULT_MILESTONE_STATUS,
-              aiSuggested: true,
-              ...(m.description ? { description: m.description } : {}),
-            })
+        }
+
+        // Round-robin interleave across subgoals so packed days mix subjects. Each
+        // item keeps its own duration, so the per-day capacity budget is spent on
+        // the REAL sizes the model chose, not a flat constant.
+        const items: PackSession[] = []
+        const rounds = Math.max(0, ...perSubgoal.map((p) => p.sessions.length))
+        for (let i = 0; i < rounds; i++) {
+          for (const p of perSubgoal) {
+            const s = p.sessions[i]
+            if (s) {
+              items.push({
+                subgoalId: p.subgoalId,
+                title: s.title,
+                description: s.description,
+                minutes: s.minutes ?? DEFAULT_DAILY_MINUTES,
+              })
+            }
           }
         }
-        if (!sg.hasTasks) {
-          const plan = await get().generateDailyPlan({
-            subgoalId: sg.id,
-            goalId,
-            subgoalTitle: sg.title,
-            subgoalDescription: sg.description,
-            goalTitle: goal.title,
-            dailyMinutes: perSubgoalMinutes,
-            ...(goal.targetDate ? { targetDate: goal.targetDate } : {}),
+
+        // Bound the window to the horizon, but never past the goal's deadline.
+        const daysToDeadline = differenceInCalendarDays(
+          parseISO(goal.targetDate),
+          new Date(),
+        )
+        const packed = packSessionsIntoDays(items, {
+          startDate: new Date(),
+          dailyBudgetMinutes: dayMinutes,
+          skipWeekdays: rawContext?.lightDays ?? [],
+          maxDays: Math.max(1, Math.min(DAILY_PLAN_HORIZON, daysToDeadline)),
+        })
+
+        for (const t of packed) {
+          await get().addTask({
+            subgoalId: t.subgoalId,
+            title: t.title,
+            status: DEFAULT_TASK_STATUS,
+            priority: DEFAULT_TASK_PRIORITY,
+            isRecurring: false,
+            scheduledDate: t.scheduledDate,
+            estimatedMinutes: t.minutes,
+            ...(t.description ? { description: t.description } : {}),
           })
-          for (const t of plan) {
-            await get().addTask({
-              subgoalId: sg.id,
-              title: t.title,
-              status: DEFAULT_TASK_STATUS,
-              priority: DEFAULT_TASK_PRIORITY,
-              isRecurring: false,
-              scheduledDate: t.scheduledDate,
-              estimatedMinutes: t.estimatedMinutes,
-              ...(t.description ? { description: t.description } : {}),
-            })
+        }
+
+        // Invariant: a subgoal with no tasks is just clutter — there is nothing to
+        // act on under it (same reasoning that stopped us auto-creating empty
+        // milestones). The packer can drop a subgoal's sessions entirely when the
+        // deadline/window is too tight, and a malformed AI reply can yield no
+        // sessions at all. Prune any subgoal THIS run created that ended up with
+        // zero scheduled tasks — never one the user authored (left as-is above).
+        const scheduledSubgoalIds = new Set(packed.map((t) => t.subgoalId))
+        for (const sg of pending) {
+          if (createdIds.has(sg.id) && !scheduledSubgoalIds.has(sg.id)) {
+            await get().removeSubgoal(sg.id)
           }
         }
       }
+    },
+
+    topUpRoadmap: async (goalId) => {
+      const tree = await getGoalTree(goalId)
+      if (!tree) return
+      const now = new Date()
+
+      for (const st of tree.subgoals) {
+        const sg = st.subgoal
+        // Only consistency subgoals carry a rolling daily plan to extend.
+        if (!sg.requiresConsistency) continue
+
+        const tasks = [...st.looseTasks, ...st.milestones.flatMap((m) => m.tasks)]
+        const scheduled = tasks
+          .map((t) => t.scheduledDate)
+          .filter((d): d is string => d !== undefined)
+        // Never planned yet — seeding is an explicit action, not a top-up.
+        if (scheduled.length === 0) continue
+
+        // Furthest scheduled day ('yyyy-MM-dd' sorts lexically). If it still has
+        // runway, leave it — only extend when the window is genuinely low.
+        const last = scheduled.reduce((a, b) => (a > b ? a : b))
+        if (differenceInCalendarDays(parseISO(last), now) >= DAILY_PLAN_LOW_WINDOW) {
+          continue
+        }
+
+        // generateDailyPlan resumes the day AFTER `last` (extend, not overlap),
+        // is capacity/day-off aware, and caps at the deadline.
+        const plan = await get().generateDailyPlan({
+          subgoalId: sg.id,
+          goalId,
+          subgoalTitle: sg.title,
+          subgoalDescription: sg.description,
+          goalTitle: tree.goal.title,
+          dailyMinutes: sg.estimatedDailyMinutes ?? DEFAULT_DAILY_MINUTES,
+          targetDate: sg.targetDate ?? tree.goal.targetDate,
+        })
+        for (const t of plan) {
+          await get().addTask({
+            subgoalId: sg.id,
+            title: t.title,
+            status: DEFAULT_TASK_STATUS,
+            priority: DEFAULT_TASK_PRIORITY,
+            isRecurring: t.isRecurring,
+            scheduledDate: t.scheduledDate,
+            estimatedMinutes: t.estimatedMinutes,
+            ...(t.description ? { description: t.description } : {}),
+          })
+        }
+      }
+    },
+
+    // Reschedule this goal's overdue tasks forward (see the interface doc). Reads
+    // the goal tree (tasks + targetDate), the goal's intake (deadlineHardness), the
+    // profile (daily capacity) and the user context (days off); the pure
+    // rescheduleOverdue decides the new dates. `new Date()` is read here (store
+    // side), never in the engine.
+    rescheduleOverdueForGoal: async (goalId) => {
+      const tree = await getGoalTree(goalId)
+      if (!tree) return 0
+
+      const now = new Date()
+      const today = format(now, 'yyyy-MM-dd')
+      const allTasks = tree.subgoals.flatMap((st) => [
+        ...st.looseTasks,
+        ...st.milestones.flatMap((m) => m.tasks),
+      ])
+      // Overdue = scheduled before today AND not yet completed. Oldest first, so the
+      // longest-missed work is placed back onto the calendar first.
+      const overdue = allTasks
+        .filter(
+          (t) =>
+            t.scheduledDate !== undefined &&
+            t.scheduledDate < today &&
+            t.status !== 'completed',
+        )
+        .sort((a, b) => ((a.scheduledDate ?? '') < (b.scheduledDate ?? '') ? -1 : 1))
+      if (overdue.length === 0) return 0
+
+      const [goalContext, profile, userContext] = await Promise.all([
+        getGoalContext(goalId),
+        getProfile(),
+        getUserContext(),
+      ])
+      const dailyBudget = (profile?.availableHoursPerDay ?? 4) * 60
+      // A hard deadline caps the window at the goal's target (overflow compresses,
+      // never slips past); a soft deadline is unbounded.
+      const maxDate =
+        goalContext?.deadlineHardness === 'hard' ? tree.goal.targetDate : null
+
+      const rescheduled = rescheduleOverdue(
+        overdue.map((t) => ({
+          id: t.id,
+          minutes: t.estimatedMinutes ?? DEFAULT_DAILY_MINUTES,
+        })),
+        {
+          from: now,
+          dailyBudgetMinutes: dailyBudget,
+          skipWeekdays: userContext?.lightDays ?? [],
+          maxDate,
+        },
+      )
+
+      // Persist the new dates, then refresh every surface a task date touches.
+      for (const r of rescheduled) {
+        await updateTask(r.id, { scheduledDate: r.scheduledDate })
+      }
+      await settleRefreshes([
+        refreshCurrentTree(),
+        refreshDashboard(),
+        refreshCrossGoal(),
+      ])
+      return rescheduled.length
     },
   }
 })
