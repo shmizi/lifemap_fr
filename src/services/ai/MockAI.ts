@@ -77,6 +77,22 @@ export class MockAI implements AIProvider {
       return Promise.resolve({ text: this.strategyBrief(request) })
     }
 
+    // A structure prompt is the only one whose SYSTEM asks for "parallel tracks".
+    // It returns a NESTED array (tracks, each with a phases[] array), not the flat
+    // suggestion array, so it must be caught before the Subgoal/Goal fallback (its
+    // user message also carries a "Goal:" line that would otherwise match).
+    if (request.system.includes('parallel tracks')) {
+      return Promise.resolve({ text: this.structure(request) })
+    }
+
+    // A scope-cut prompt is the only one whose SYSTEM asks to "TRIM SCOPE" (a goal
+    // behind on a hard deadline). It returns a single JSON OBJECT, so catch it here
+    // before the Subgoal/Goal array fallback (its user message also carries a
+    // "Goal:" line that would otherwise match).
+    if (request.system.includes('TRIM SCOPE')) {
+      return Promise.resolve({ text: this.scopeCut(request) })
+    }
+
     // A daily-plan prompt is the only one with a "Days to plan:" line — check it
     // FIRST, because that prompt also carries a "Subgoal:" line (which would
     // otherwise look like a milestone request).
@@ -150,6 +166,56 @@ export class MockAI implements AIProvider {
       notes: [`Plan tailored to ${goal}.`],
     }
     return JSON.stringify(brief)
+  }
+
+  // A deterministic, plausible goal STRUCTURE in the nested JSON shape
+  // parsers/structure.ts expects: a few tracks (from the subgoal templates), each
+  // carrying a few ordered phases (from the milestone templates). Names the goal so
+  // the output visibly responds to the input, like the other mocks. UNDATED and
+  // task-free — the structure stage only scopes tracks + phases.
+  private structure(request: AIRequest): string {
+    const goal = extractLine(request, 'Goal') ?? 'this goal'
+    const tracks = SUBGOAL_TEMPLATES.slice(0, 3).map((track) => ({
+      title: track.title,
+      description: `${track.description} (toward ${goal})`,
+      phases: MILESTONE_TEMPLATES.slice(0, 3).map((phase) => ({
+        title: phase.title,
+        description: phase.description,
+      })),
+    }))
+    return JSON.stringify(tracks)
+  }
+
+  // A deterministic, plausible SCOPE-CUT proposal in the JSON-OBJECT shape
+  // parsers/scopeCut.ts expects, for a goal behind on a HARD deadline. Names the
+  // goal and — when the prompt carries a roadmap digest — targets the FIRST real
+  // track by title, so the store's apply step has a matchable target to defer even
+  // offline. The `cut`/`compress` suggestions use generic phrases, so the mock's
+  // default apply stays non-destructive (they resolve to "unmatched"/advisory).
+  private scopeCut(request: AIRequest): string {
+    const goal = extractLine(request, 'Goal') ?? 'this goal'
+    const firstTrack = extractFirstTrackTitle(request) ?? 'the lowest-priority track'
+    const proposal = {
+      summary: `To still hit the deadline on "${goal}", protect the core work and trim the rest.`,
+      suggestions: [
+        {
+          target: firstTrack,
+          action: 'defer',
+          rationale: 'Move this off the dated plan and finish it after the deadline.',
+        },
+        {
+          target: 'nice-to-have extras',
+          action: 'cut',
+          rationale: 'Drop what the strategy does not call essential.',
+        },
+        {
+          target: 'the review cadence',
+          action: 'compress',
+          rationale: 'Keep it, but lighter — less often and shorter.',
+        },
+      ],
+    }
+    return JSON.stringify(proposal)
   }
 
   // Generate `days` ordered daily sessions (capped to the horizon), cycling a few
@@ -253,6 +319,19 @@ function slug(text: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
+}
+
+// Pull the first track title out of a roadmap-digest block in the prompt (a line
+// like "- Foundations: • Phase (3 tasks); …", written by renderDigestLines), so the
+// mock's scope-cut proposal can target a REAL track and its apply step is
+// demonstrable offline. Null when no digest is present (a goal with no structure).
+function extractFirstTrackTitle(request: AIRequest): string | null {
+  const pattern = /^- (.+?): .*task/m
+  for (const message of request.messages) {
+    const match = message.content.match(pattern)
+    if (match) return match[1].trim()
+  }
+  return null
 }
 
 // Best-effort pull of a "Label: value" line from the request, matching the lines

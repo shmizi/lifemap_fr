@@ -36,6 +36,7 @@ import { TaskCreationModal } from '@/features/goals/TaskCreationModal'
 import { SubgoalCreationModal } from '@/features/goals/SubgoalCreationModal'
 import { SubgoalDependencies } from '@/features/goals/SubgoalDependencies'
 import { TaskRow } from '@/features/goals/TaskRow'
+import { partitionScheduledAndBacklog } from '@/engine/planning/partitionTasks'
 
 interface SubgoalSectionProps {
   data: SubgoalTree
@@ -134,6 +135,21 @@ export function SubgoalSection({
     ...milestones.flatMap((m) => m.tasks),
   ])
 
+  // Split this subgoal's loose tasks into the dated plan and the undated "Later"
+  // backlog (Phase 10). The backlog informs here but never nags on the dashboard
+  // (its day-keyed lists query the scheduledDate index, which undated rows aren't
+  // in). Milestone tasks keep their own grouping — a milestone is its own phase.
+  const { scheduled: scheduledLooseTasks, backlog: backlogLooseTasks } =
+    partitionScheduledAndBacklog(looseTasks)
+
+  // Phase 10 auto-advance: the next phase to plan is the first milestone that isn't
+  // completed yet. As each phase is finished (its milestone auto-completes), this
+  // marker marches forward to the following phase — so the moment a phase wraps, the
+  // next one is surfaced as "up next", ready to expand into tasks.
+  const nextPhaseId = [...milestones]
+    .sort((a, b) => a.milestone.order - b.milestone.order)
+    .find((mt) => mt.milestone.status !== 'completed')?.milestone.id
+
   // Whether this subgoal is either end of any dependency edge — if so, deleting
   // it also removes those edges (handled atomically in the repository), so the
   // delete confirmation says so.
@@ -211,23 +227,43 @@ export function SubgoalSection({
             <MilestoneCard
               key={milestoneTree.milestone.id}
               data={milestoneTree}
+              goalId={goalId}
               // Guard with the current status so a complete-then-reopen while
               // collapsed doesn't celebrate a milestone that's no longer done.
               celebrateOnAppear={
                 pendingCelebrations.has(milestoneTree.milestone.id) &&
                 milestoneTree.milestone.status === 'completed'
               }
+              // "Up next" only when this is the current phase AND it still needs
+              // planning (no tasks yet) — a phase already in progress isn't nudged.
+              isNextPhase={
+                milestoneTree.milestone.id === nextPhaseId &&
+                milestoneTree.tasks.length === 0
+              }
             />
           ))}
 
-          {looseTasks.length > 0 ? (
+          {scheduledLooseTasks.length > 0 ? (
             <div className="space-y-1">
               {milestoneCount > 0 ? (
                 <p className="text-xs font-medium uppercase tracking-wide text-app-text-muted">
                   Other tasks
                 </p>
               ) : null}
-              {looseTasks.map((task) => (
+              {scheduledLooseTasks.map((task) => (
+                <TaskRow key={task.id} task={task} />
+              ))}
+            </div>
+          ) : null}
+
+          {/* Undated "Later" backlog — parked work with no calendar date yet. Shown
+              calmly (informs) but it never appears on the dashboard's daily lists. */}
+          {backlogLooseTasks.length > 0 ? (
+            <div className="space-y-1">
+              <p className="text-xs font-medium uppercase tracking-wide text-app-text-muted">
+                Later · not scheduled
+              </p>
+              {backlogLooseTasks.map((task) => (
                 <TaskRow key={task.id} task={task} />
               ))}
             </div>

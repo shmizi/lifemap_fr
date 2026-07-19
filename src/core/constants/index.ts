@@ -20,17 +20,22 @@ export const APP_NAME = 'LifeMap' as const;
 
 // Route paths — used in router config and navigation links
 export const ROUTES = {
-  DASHBOARD:   '/',
-  GOALS:       '/goals',
-  GOAL_DETAIL: '/goals/:id',
-  ROADMAP:     '/roadmap',
-  REVIEWS:     '/reviews',
-  DISCOVERY:   '/discovery',
-  SETTINGS:    '/settings',
+  DASHBOARD:      '/',
+  GOALS:          '/goals',
+  GOAL_DETAIL:    '/goals/:id',
+  PHASE_CHECK_IN: '/goals/:goalId/phases/:milestoneId/check-in',
+  ROADMAP:        '/roadmap',
+  REVIEWS:        '/reviews',
+  DISCOVERY:      '/discovery',
+  SETTINGS:       '/settings',
 } as const;
 
 // Helper to build goal detail path with a real ID
 export const goalDetailPath = (id: string) => `/goals/${id}`;
+
+// Helper to build the phase-end check-in path for one phase (milestone) of a goal.
+export const phaseCheckInPath = (goalId: string, milestoneId: string) =>
+  `/goals/${goalId}/phases/${milestoneId}/check-in`;
 
 // Default values for a new user profile
 export const DEFAULT_USER_PROFILE = {

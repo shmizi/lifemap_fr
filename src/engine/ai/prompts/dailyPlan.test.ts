@@ -58,6 +58,35 @@ describe('buildDailyPlanPrompt', () => {
     expect(system).toContain('not daily')
   })
 
+  it('splices the roadmap digest into the message when provided', () => {
+    const text = userText({
+      ...base,
+      digest: {
+        goalTitle: 'Get German to B2',
+        tracks: [
+          {
+            title: 'Vocabulary',
+            phases: [{ title: 'Core 500', done: true, taskCount: 5 }],
+            currentPhase: null,
+          },
+        ],
+        recent: {
+          windowStart: '2026-06-05',
+          windowEnd: '2026-06-18',
+          completed: 4,
+          missed: 1,
+        },
+      },
+    })
+    expect(text).toContain('Roadmap so far')
+    expect(text).toContain('Vocabulary')
+    expect(text).toContain('Last 2 weeks')
+  })
+
+  it('omits the digest lines when no digest is provided', () => {
+    expect(userText(base)).not.toContain('Roadmap so far')
+  })
+
   it('omits the description line when the subgoal description is blank', () => {
     expect(userText({ ...base, subgoalDescription: '  ' })).not.toContain(
       'Subgoal description:',

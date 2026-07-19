@@ -26,6 +26,8 @@ import { useGoalStore } from '@/store/useGoalStore'
 import { ProgressRing } from '@/components/progress/ProgressRing'
 import { SubgoalSection } from '@/features/goals/SubgoalSection'
 import { StrategyBriefPanel } from '@/features/goals/StrategyBriefPanel'
+import { ScopeCutNudge } from '@/features/goals/ScopeCutNudge'
+import { StructureReviewModal } from '@/features/goals/StructureReviewModal'
 import { SubgoalCreationModal } from '@/features/goals/SubgoalCreationModal'
 import { SuggestedSubgoalsModal } from '@/features/goals/SuggestedSubgoalsModal'
 import { GoalCreationModal } from '@/features/goals/GoalCreationModal'
@@ -57,6 +59,10 @@ export function GoalDetailPage() {
   // Whole-goal momentum, derived from the same tree by the store. Shown in the
   // header above the per-subgoal rings; hidden until the goal has tasks.
   const goalProgress = useGoalStore((s) => s.currentGoalProgress)
+  // Phase 10 — the finish projection + deadline hardness the store computes on tree
+  // load. Together they gate the hard-deadline scope-cut nudge (behind + hard).
+  const goalProjection = useGoalStore((s) => s.currentGoalProjection)
+  const goalDeadlineHardness = useGoalStore((s) => s.currentGoalDeadlineHardness)
   const [isAddSubgoalOpen, setIsAddSubgoalOpen] = useState(false)
   const [isSuggestSubgoalsOpen, setIsSuggestSubgoalsOpen] = useState(false)
   const [isEditGoalOpen, setIsEditGoalOpen] = useState(false)
@@ -64,6 +70,11 @@ export function GoalDetailPage() {
   const generateFullRoadmap = useGoalStore((s) => s.generateFullRoadmap)
   const [isGenerating, setIsGenerating] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
+  // Phase 10, Stage 2 — the staged STRUCTURE build (model-scoped tracks + phases,
+  // undated). Only offered on a goal with no subgoals yet (structure seeds the arc).
+  // The model's proposal is reviewed/edited before anything is written (the modal
+  // owns its own fetch/loading/error).
+  const [isStructureReviewOpen, setIsStructureReviewOpen] = useState(false)
   // Reschedule-on-miss: pull this goal's overdue tasks back onto upcoming days.
   const rescheduleOverdueForGoal = useGoalStore((s) => s.rescheduleOverdueForGoal)
   const [isRescheduling, setIsRescheduling] = useState(false)
@@ -102,6 +113,14 @@ export function GoalDetailPage() {
   }
 
   const { goal, subgoals } = tree
+
+  // The scope-cut escalation shows only when the goal is projected to miss a HARD
+  // deadline: the date can't move, so rescheduling can't rescue it — the plan must
+  // shrink. A soft deadline (or on-pace goal) never sees this.
+  const isBehindHardDeadline =
+    goalDeadlineHardness === 'hard' &&
+    goalProjection !== null &&
+    goalProjection.daysBehind > 0
   // Flat {id, title} list of this goal's subgoals, for each section's dependency
   // picker and supporter-title lookup.
   const allSubgoals = subgoals.map((st) => ({
@@ -160,6 +179,7 @@ export function GoalDetailPage() {
       setIsGenerating(false)
     }
   }
+
 
   return (
     <section className="mx-auto max-w-3xl">
@@ -273,6 +293,12 @@ export function GoalDetailPage() {
         <p className="mt-2 text-xs text-app-text-muted">{rescheduleNote}</p>
       ) : null}
 
+      {/* Hard-deadline escalation: when the goal is projected to miss a deadline that
+          can't move, offer an AI scope-cut proposal (the user approves the changes). */}
+      {isBehindHardDeadline && goalProjection ? (
+        <ScopeCutNudge goalId={goal.id} daysBehind={goalProjection.daysBehind} />
+      ) : null}
+
       {/* Direction layer (Phase 10) — the strategy brief, above the roadmap:
           "what am I really aiming at?" before "what do I do?". */}
       <StrategyBriefPanel goalId={goal.id} />
@@ -317,6 +343,14 @@ export function GoalDetailPage() {
               >
                 <Sparkles size={16} />
                 {isGenerating ? 'Building your roadmap…' : 'Generate roadmap with AI'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsStructureReviewOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-app-lg border border-app-border px-4 py-2 text-sm font-semibold text-app-text transition hover:bg-app-border/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+              >
+                <Sparkles size={16} />
+                Generate structure only
               </button>
               <button
                 type="button"
@@ -369,6 +403,13 @@ export function GoalDetailPage() {
         goal={goal}
         open={isEditGoalOpen}
         onClose={() => setIsEditGoalOpen(false)}
+      />
+
+      {/* Review the AI-proposed structure before it's written (tracks + phases). */}
+      <StructureReviewModal
+        goalId={goal.id}
+        open={isStructureReviewOpen}
+        onClose={() => setIsStructureReviewOpen(false)}
       />
     </section>
   )

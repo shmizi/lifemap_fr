@@ -15,6 +15,7 @@ import {
   renderGoalContextLines,
 } from '@/engine/ai/prompts/system'
 import { renderStrategyBriefLines } from '@/engine/ai/prompts/strategyBrief'
+import { renderDigestLines } from '@/engine/review/computeRoadmapDigest'
 
 // The bounded planning window (DAILY_PLAN_HORIZON) lives in core/constants so the
 // UI can read it without importing engine/; the caller passes the already-bounded
@@ -30,6 +31,7 @@ export function buildDailyPlanPrompt(context: DailyPlanContext): AIRequest {
     userContext,
     goalContext,
     strategyBrief,
+    digest,
   } = context
 
   const SYSTEM_INSTRUCTION = [
@@ -57,6 +59,9 @@ export function buildDailyPlanPrompt(context: DailyPlanContext): AIRequest {
   lines.push(...renderGoalContextLines(goalContext))
   // Phase 10: the Direction the sessions should serve (goal's Strategy Brief).
   lines.push(...renderStrategyBriefLines(strategyBrief))
+  // Phase 10: the bounded roadmap digest — where this phase sits in the whole plan
+  // and how recent execution has gone — so the sessions stay coherent with reality.
+  if (digest) lines.push(...renderDigestLines(digest))
   lines.push('Design the daily plan.')
 
   return {

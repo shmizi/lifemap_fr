@@ -27,6 +27,7 @@ import type {
   DeadlineHardness,
   StrategyBrief,
 } from '@/core/types'
+import type { RoadmapDigest } from '@/engine/review/computeRoadmapDigest'
 
 // ── Provider-agnostic transport ──────────────────────────────────────────────
 
@@ -241,6 +242,11 @@ export interface DailyPlanContext {
   // The goal's stored Strategy Brief (Phase 10) — so the daily sessions serve the
   // strategy's priorities, not just the subgoal in isolation. Spliced in when present.
   strategyBrief?: StrategyBrief
+  // The bounded roadmap DIGEST (Phase 10): where this phase sits in the whole plan,
+  // the sibling tracks/phases, and recent completed/missed counts — so a rolling
+  // generation stays coherent with reality without ever sending task history. Its
+  // size is bounded by the plan's shape, not by how much history has accrued.
+  digest?: RoadmapDigest
 }
 
 // One scheduled daily task, ready for the existing addTask path. scheduledDate is
@@ -320,6 +326,96 @@ export interface StrategyBriefContext {
   // Personalization (Phase 9) — filled by the store, not the UI.
   userContext?: AIUserContext
   goalContext?: AIGoalContext
+}
+
+// ── Feature: typed structure (Phase 10 — Stage 2 STRUCTURE) ──────────────────
+// The model-scoped skeleton between the Strategy Brief and dated tasks: the model
+// itself decides HOW MANY tracks (subgoals) the goal needs and HOW MANY phases
+// (milestones) each track moves through, in order — all UNDATED. There are NO
+// tasks here: task-level detail (durations, cadence, dates) is Stage 3, expanded
+// ONE phase at a time by the existing daily-plan generation. Track = Subgoal and
+// Phase = Milestone (the canonical mapping), so an accepted structure writes
+// straight through the existing addSubgoal / addMilestone paths. This is the
+// keystone that replaces the old hardcoded "~5 subgoals" decomposition with a
+// scope the model reasons out from the Direction.
+//
+// The matching builder is prompts/structure.ts; the tolerant parser is
+// parsers/structure.ts (never throws; caps both levels).
+
+// One phase within a track — becomes a Milestone. Undated; order is the array index.
+export interface PlannedPhase {
+  title: string
+  description?: string
+}
+
+// One track of the plan — becomes a Subgoal, carrying its ordered phases (which may
+// be empty: a track can start as a bare subgoal the schedule stage fills in later).
+export interface PlannedTrack {
+  title: string
+  description?: string
+  phases: PlannedPhase[]
+}
+
+// What the structure builder needs to describe ONE goal + its Direction to the
+// model. Plain strings + context, NOT entities, so the builder stays pure and
+// unit-testable; the store assembles it (like the other feature contexts).
+export interface StructureContext {
+  // The goal's id — the store uses it to fetch this goal's intake context; the
+  // prompt builder ignores it (not rendered into the prompt).
+  goalId: ID
+  goalTitle: string
+  goalDescription: string
+  // Human-readable category label (e.g. "Education").
+  goalCategory: string
+  // The target date, if any, so the structure can reason about time pressure.
+  targetDate?: ISODate
+  // Personalization (Phase 9) — filled by the store, not the UI.
+  userContext?: AIUserContext
+  goalContext?: AIGoalContext
+  // The goal's stored Strategy Brief (Phase 10) — the Direction the structure must
+  // serve. Optional; the store loads it and splices it in when present.
+  strategyBrief?: StrategyBrief
+}
+
+// ── Feature: hard-deadline scope-cut escalation (Phase 10) ───────────────────
+// When a goal is BEHIND on a HARD deadline, rescheduling can't absorb the miss —
+// the date can't move — so the coach proposes trimming SCOPE for the user to
+// approve. This is a Layer-1 (Direction) decision: AI proposes, USER approves; the
+// mechanical reschedule for SOFT deadlines stays a pure engine concern (no AI).
+// Builder: prompts/scopeCut.ts; tolerant parser: parsers/scopeCut.ts.
+
+// cut = drop it; compress = keep it but do less; defer = finish it after the date.
+export type ScopeCutAction = 'cut' | 'compress' | 'defer'
+
+export interface ScopeCutSuggestion {
+  // What to trim — named so the user recognises it (a track/phase/theme title).
+  target: string
+  action: ScopeCutAction
+  rationale: string
+}
+
+export interface ScopeCutProposal {
+  // The overall reframe: how to still hit the date by narrowing focus.
+  summary: string
+  suggestions: ScopeCutSuggestion[]
+}
+
+// What the scope-cut builder needs. `behindSummary` is the store's plain-language
+// statement of the gap (from computeGoalProjection) — e.g. "at the current pace,
+// projected to finish ~3 weeks after the deadline". The digest gives the model the
+// structure it can trim; the brief tells it what matters most (protect that, cut
+// the rest). Assembled by the store, so the builder stays pure.
+export interface ScopeCutContext {
+  goalId: ID
+  goalTitle: string
+  goalDescription: string
+  goalCategory: string
+  targetDate?: ISODate
+  behindSummary: string
+  userContext?: AIUserContext
+  goalContext?: AIGoalContext
+  strategyBrief?: StrategyBrief
+  digest?: RoadmapDigest
 }
 
 // ── Feature: opportunity discovery (extraction) ──────────────────────────────

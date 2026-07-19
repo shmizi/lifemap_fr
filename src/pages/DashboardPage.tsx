@@ -10,7 +10,7 @@
 // slices; it holds no business logic — the engine lays the map out, the store
 // assembles it, the panels present it.
 
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useGoalStore } from '@/store/useGoalStore'
 import { useLifeMap } from '@/core/hooks/useLifeMap'
@@ -21,6 +21,7 @@ import { TodayFocusPanel } from '@/features/dashboard/livingmap/TodayFocusPanel'
 import { JourneyOverviewPanel } from '@/features/dashboard/livingmap/JourneyOverviewPanel'
 import { UpcomingPanel, type UpcomingItem } from '@/features/dashboard/livingmap/UpcomingPanel'
 import { DailyQuotePanel } from '@/features/dashboard/livingmap/DailyQuotePanel'
+import { CatchUpPanel } from '@/features/dashboard/livingmap/CatchUpPanel'
 
 function greeting(d: Date): string {
   const h = d.getHours()
@@ -36,8 +37,28 @@ export function DashboardPage() {
 
   const todaysTasks = useGoalStore((s) => s.todaysTasks)
   const topPriorityTasks = useGoalStore((s) => s.topPriorityTasks)
+  const overdueTasks = useGoalStore((s) => s.overdueTasks)
   const toggleTaskComplete = useGoalStore((s) => s.toggleTaskComplete)
+  const rescheduleAllOverdue = useGoalStore((s) => s.rescheduleAllOverdue)
   const loadDashboard = useGoalStore((s) => s.loadDashboard)
+
+  // Cross-goal "catch up": pull every goal's missed work forward under one shared
+  // daily budget. The store refreshes overdueTasks, so a success empties it and the
+  // panel unmounts itself; only a failure surfaces a note.
+  const [isRescheduling, setIsRescheduling] = useState(false)
+  const [rescheduleNote, setRescheduleNote] = useState<string | null>(null)
+  async function handleRescheduleAll() {
+    if (isRescheduling) return
+    setIsRescheduling(true)
+    setRescheduleNote(null)
+    try {
+      await rescheduleAllOverdue()
+    } catch {
+      setRescheduleNote('Could not reschedule just now. Please try again.')
+    } finally {
+      setIsRescheduling(false)
+    }
+  }
 
   // The map loads via useLifeMap; this load fills the task windows the panels use.
   useEffect(() => {
@@ -102,6 +123,16 @@ export function DashboardPage() {
           <UpcomingPanel items={upcoming} initial={{ bottom: 20, right: 20 }} width={248} />
           <JourneyOverviewPanel goals={cities.length} subgoals={townCount} overallPercent={overallPercent} initial={{ bottom: 20, left: 20 }} width={296} />
           <DailyQuotePanel initial={{ top: 104, left: 20 }} width={272} />
+          {overdueTasks.length > 0 && (
+            <CatchUpPanel
+              count={overdueTasks.length}
+              isRescheduling={isRescheduling}
+              note={rescheduleNote}
+              onReschedule={handleRescheduleAll}
+              initial={{ bottom: 20, left: 336 }}
+              width={248}
+            />
+          )}
         </>
       )}
     </div>

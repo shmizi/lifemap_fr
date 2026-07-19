@@ -5,6 +5,7 @@ import {
   DashboardPage,
   GoalsPage,
   GoalDetailPage,
+  PhaseCheckInPage,
   WeeklyReviewPage,
   DiscoveryPage,
   SettingsPage,
@@ -23,6 +24,8 @@ export const router = createBrowserRouter([
       // Detail route. Static '/goals' above is matched ahead of this dynamic
       // '/goals/:id' by React Router's ranking, so order here is not fragile.
       { path: ROUTES.GOAL_DETAIL,  element: <GoalDetailPage /> },
+      // Phase-end check-in (Phase 10) — a guided 3-beat flow for a completed phase.
+      { path: ROUTES.PHASE_CHECK_IN, element: <PhaseCheckInPage /> },
       // Roadmap retired — its journey now lives on the Dashboard's living map.
       // The roadmap ENGINE (buildRoadmap / computeLifeMapLayout) and the store's
       // loadRoadmap remain; only the standalone screen is gone.

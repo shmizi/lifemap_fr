@@ -87,4 +87,45 @@ describe('packSessionsIntoDays', () => {
       packSessionsIntoDays([], { startDate: start, dailyBudgetMinutes: 60 }),
     ).toEqual([])
   })
+
+  it('leaves reserved minutes room: progression fills only the remainder', () => {
+    // Thu has 20 min reserved (a habit); budget 60 -> 40 left. Two 20-min
+    // progression sessions (40) fit exactly on Thu alongside the reservation.
+    const packed = packSessionsIntoDays(sessions(2, 20), {
+      startDate: start,
+      dailyBudgetMinutes: 60,
+      reservedMinutesByDay: { '2026-06-25': 20 },
+    })
+    expect(packed.map((p) => p.scheduledDate)).toEqual([
+      '2026-06-25',
+      '2026-06-25',
+    ])
+  })
+
+  it('spills progression to the next day when reservations crowd a day', () => {
+    // Thu has 40 min reserved; budget 60 -> only 20 left, too little for a 30-min
+    // session, so both 30s spill to Fri (which is unreserved: 60 fits two).
+    const packed = packSessionsIntoDays(sessions(2, 30), {
+      startDate: start,
+      dailyBudgetMinutes: 60,
+      reservedMinutesByDay: { '2026-06-25': 40 },
+    })
+    expect(packed.map((p) => p.scheduledDate)).toEqual([
+      '2026-06-26',
+      '2026-06-26',
+    ])
+  })
+
+  it('skips a fully-reserved day entirely for progression', () => {
+    // Thu is fully booked by habits (60/60); the lone progression session lands Fri.
+    const packed = packSessionsIntoDays(
+      [{ subgoalId: 'a', title: 's', minutes: 30 }],
+      {
+        startDate: start,
+        dailyBudgetMinutes: 60,
+        reservedMinutesByDay: { '2026-06-25': 60 },
+      },
+    )
+    expect(packed.map((p) => p.scheduledDate)).toEqual(['2026-06-26'])
+  })
 })

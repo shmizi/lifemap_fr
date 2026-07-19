@@ -37,6 +37,13 @@ export interface PackOptions {
   // Cap on the calendar-day span from startDate; sessions that would land beyond
   // it are dropped (they belong to a later rolling-window generation).
   maxDays?: number
+  // RESERVE-then-pack (Phase 10): minutes already spoken for on given days —
+  // keyed by 'yyyy-MM-dd' — before any of these sessions are placed. The caller
+  // pre-expands RECURRING habits (which land on fixed cadence dates) and passes
+  // their per-day minute totals here; the packer then fits the one-time progression
+  // backbone into what each day has LEFT, so a day's habits + progression together
+  // never exceed the budget. Absent/empty ⇒ unchanged behaviour (nothing reserved).
+  reservedMinutesByDay?: Record<ISODate, number>
 }
 
 export function packSessionsIntoDays(
@@ -50,6 +57,9 @@ export function packSessionsIntoDays(
       : new Set<number>()
   const budget = Math.max(1, opts.dailyBudgetMinutes)
   const maxDays = opts.maxDays ?? Number.POSITIVE_INFINITY
+  const reserved = opts.reservedMinutesByDay ?? {}
+  // Minutes already reserved (by pre-placed recurring habits) on a given day.
+  const reservedOn = (d: Date): number => reserved[format(d, DATE_KEY)] ?? 0
 
   const out: PackedSession[] = []
   let cursor = opts.startDate
@@ -57,19 +67,25 @@ export function packSessionsIntoDays(
     while (skip.has(cursor.getDay())) cursor = addDays(cursor, 1)
   }
   advanceToWorkday()
-  let usedToday = 0
+  // A day begins already "used" by whatever habits are reserved on it, so the
+  // progression backbone only fills the remainder.
+  let usedToday = reservedOn(cursor)
 
   for (const session of sessions) {
-    if (differenceInCalendarDays(cursor, opts.startDate) >= maxDays) break
-
-    // Full day? Move to the next working day. (A single session bigger than the
-    // whole budget still lands — alone — on its own day, never dropped for size.)
-    if (usedToday > 0 && usedToday + session.minutes > budget) {
+    // Advance to the first working day that can hold this session. A session lands
+    // when it FITS in the day's remaining budget, OR the day is otherwise EMPTY
+    // (usedToday === 0: no reservation and nothing packed) — a single session
+    // bigger than the whole budget still lands, alone, rather than being dropped
+    // for size. Otherwise skip forward (past habit-reserved or already-full days),
+    // so a spilled session never overflows a day whose habits already claim it.
+    while (differenceInCalendarDays(cursor, opts.startDate) < maxDays) {
+      if (usedToday + session.minutes <= budget || usedToday === 0) break
       cursor = addDays(cursor, 1)
       advanceToWorkday()
-      usedToday = 0
-      if (differenceInCalendarDays(cursor, opts.startDate) >= maxDays) break
+      usedToday = reservedOn(cursor)
     }
+    // Ran out of window — the rest belongs to a later rolling generation.
+    if (differenceInCalendarDays(cursor, opts.startDate) >= maxDays) break
 
     out.push({ ...session, scheduledDate: format(cursor, DATE_KEY) })
     usedToday += session.minutes
