@@ -64,6 +64,9 @@ export function renderGoalContextLines(context?: AIGoalContext): string[] {
   if (!context) return []
   const lines: string[] = []
 
+  if (context.successDefinition && context.successDefinition.trim()) {
+    lines.push(`What achieving it actually means (the target to plan toward): ${context.successDefinition.trim()}`)
+  }
   if (context.startingLevel && context.startingLevel.trim()) {
     lines.push(`Starting point on this goal: ${context.startingLevel.trim()}`)
   }
@@ -72,6 +75,9 @@ export function renderGoalContextLines(context?: AIGoalContext): string[] {
   }
   if (context.motivation && context.motivation.trim()) {
     lines.push(`Why it matters to them: ${context.motivation.trim()}`)
+  }
+  if (context.learnings && context.learnings.trim()) {
+    lines.push(`What they've learned working this goal so far (adapt the plan to this): ${context.learnings.trim()}`)
   }
   if (context.deadlineHardness === 'hard') {
     lines.push(

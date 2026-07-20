@@ -368,10 +368,12 @@ const loadAIGoalContext = async (
   const ctx = await getGoalContext(goalId)
   if (!ctx) return undefined
   return {
+    successDefinition: ctx.successDefinition,
     startingLevel: ctx.startingLevel,
     priorExperience: ctx.priorExperience,
     deadlineHardness: ctx.deadlineHardness,
     motivation: ctx.motivation,
+    learnings: ctx.learnings,
   }
 }
 
@@ -2023,6 +2025,16 @@ export const useGoalStore = create<GoalState>()((set, get) => {
         // decides WHEN. `dailyMinutes` is only a sizing hint — each session carries
         // its own model-decided minutes (falling back to DEFAULT_DAILY_MINUTES). The
         // digest (computed once) gives every subgoal's plan the whole-roadmap context.
+        // De-dup across subgoals: seed with any tasks the goal ALREADY has, then feed
+        // each subgoal's freshly-planned titles forward so a later subgoal never
+        // regenerates work an earlier one already owns (the digest carries only
+        // counts, so without this siblings are blind to each other's actual tasks).
+        // Bounded by the plan's shape — generation-time only, so the flat-cost
+        // principle for rolling calls is untouched.
+        const plannedTitles: string[] = tree.subgoals.flatMap((st) => [
+          ...st.looseTasks.map((t) => t.title),
+          ...st.milestones.flatMap((m) => m.tasks.map((t) => t.title)),
+        ])
         const perSubgoal: { subgoalId: ID; sessions: PlannedSession[] }[] = []
         for (const sg of pending) {
           const response = await aiProvider.complete(
@@ -2036,12 +2048,13 @@ export const useGoalStore = create<GoalState>()((set, get) => {
               goalContext,
               strategyBrief,
               digest,
+              plannedElsewhere: plannedTitles,
             }),
           )
-          perSubgoal.push({
-            subgoalId: sg.id,
-            sessions: parsePlannedSessions(response, DAILY_PLAN_HORIZON),
-          })
+          const sessions = parsePlannedSessions(response, DAILY_PLAN_HORIZON)
+          perSubgoal.push({ subgoalId: sg.id, sessions })
+          // Feed this subgoal's titles forward so the next subgoal avoids them.
+          for (const s of sessions) plannedTitles.push(s.title)
         }
 
         // Window: the horizon, never past the goal's deadline. Shared by the

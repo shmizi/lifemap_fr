@@ -155,6 +155,11 @@ function GoalForm({
   const [description, setDescription] = useState(goal?.description ?? '')
 
   // Per-goal intake (GoalContext) — seeded from the fetched context in edit mode.
+  // The success definition is the goal's DESTINATION (what "done" means); it lives
+  // in GoalContext because it's AI-planning context, not a Goal column.
+  const [successDefinition, setSuccessDefinition] = useState(
+    goalContext?.successDefinition ?? '',
+  )
   const [deadlineHardness, setDeadlineHardness] = useState<DeadlineHardness>(
     goalContext?.deadlineHardness ?? DEFAULT_DEADLINE_HARDNESS,
   )
@@ -203,6 +208,7 @@ function GoalForm({
       await saveGoalContext({
         goalId,
         deadlineHardness,
+        successDefinition: successDefinition.trim() || undefined,
         startingLevel: startingLevel.trim() || undefined,
         priorExperience: priorExperience.trim() || undefined,
         motivation: motivation.trim() || undefined,
@@ -255,9 +261,25 @@ function GoalForm({
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={3}
-            placeholder="What does reaching this goal look like?"
+            placeholder="A short summary of the goal itself."
             className={`${inputClass} resize-none`}
           />
+        </Field>
+
+        {/* Definition of success — the goal's DESTINATION. Persisted to GoalContext
+            (see state above), not the Goal row, because it's AI-planning context:
+            the concrete target the roadmap is built toward. */}
+        <Field label="What does achieving this actually mean?">
+          <textarea
+            value={successDefinition}
+            onChange={(e) => setSuccessDefinition(e.target.value)}
+            rows={3}
+            placeholder="The concrete finish line — what will be true when you've done it. e.g. 'An admission offer for an MSc in CS at a target university, funded or affordable.'"
+            className={`${inputClass} resize-none`}
+          />
+          <span className="mt-1.5 block text-xs text-app-text-muted">
+            Gives the AI a sharp target to plan toward — not just what the goal is, but what reaching it looks like.
+          </span>
         </Field>
       </div>
 

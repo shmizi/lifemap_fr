@@ -18,7 +18,6 @@ import {
 } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import type {
-  Dependency,
   ID,
   MilestoneStatus,
   SubgoalTree,
@@ -34,7 +33,6 @@ import { SuggestedMilestonesModal } from '@/features/goals/SuggestedMilestonesMo
 import { DailyPlanModal } from '@/features/goals/DailyPlanModal'
 import { TaskCreationModal } from '@/features/goals/TaskCreationModal'
 import { SubgoalCreationModal } from '@/features/goals/SubgoalCreationModal'
-import { SubgoalDependencies } from '@/features/goals/SubgoalDependencies'
 import { TaskRow } from '@/features/goals/TaskRow'
 import { partitionScheduledAndBacklog } from '@/engine/planning/partitionTasks'
 
@@ -46,19 +44,12 @@ interface SubgoalSectionProps {
   // The parent goal's title — context the AI milestone suggester needs (the
   // subgoal alone is ambiguous without the goal it serves). Passed from the page.
   goalTitle: string
-  // Every subgoal in this goal (for the dependency picker + title lookup) and
-  // the loaded subgoal-type edges. Both come from the page, which owns the
-  // single dependency-graph load.
-  allSubgoals: { id: ID; title: string }[]
-  subgoalDependencies: Dependency[]
 }
 
 export function SubgoalSection({
   data,
   goalId,
   goalTitle,
-  allSubgoals,
-  subgoalDependencies,
 }: SubgoalSectionProps) {
   const { subgoal, milestones, looseTasks } = data
   const removeSubgoal = useGoalStore((s) => s.removeSubgoal)
@@ -150,13 +141,6 @@ export function SubgoalSection({
     .sort((a, b) => a.milestone.order - b.milestone.order)
     .find((mt) => mt.milestone.status !== 'completed')?.milestone.id
 
-  // Whether this subgoal is either end of any dependency edge — if so, deleting
-  // it also removes those edges (handled atomically in the repository), so the
-  // delete confirmation says so.
-  const participatesInDeps = subgoalDependencies.some(
-    (e) => e.fromId === subgoal.id || e.toId === subgoal.id,
-  )
-
   // Minutes per session for this subgoal's daily plan (its own setting, or the
   // gentle default). The plan's start day + length are derived in the store from
   // the subgoal's existing tasks + deadline, not here.
@@ -204,9 +188,6 @@ export function SubgoalSection({
           entityLabel="subgoal"
           onEdit={() => setIsEditOpen(true)}
           onDelete={() => removeSubgoal(subgoal.id)}
-          confirmHint={
-            participatesInDeps ? 'Dependency links removed too.' : undefined
-          }
         />
       </div>
 
@@ -313,12 +294,6 @@ export function SubgoalSection({
               </button>
             ) : null}
           </div>
-
-          <SubgoalDependencies
-            subgoalId={subgoal.id}
-            allSubgoals={allSubgoals}
-            edges={subgoalDependencies}
-          />
         </div>
       ) : null}
 

@@ -201,6 +201,11 @@ export interface StrategyBrief {
 // with the SAME goal get DIFFERENT roadmaps: same target, different starting point.
 export interface GoalContext {
   goalId: ID;
+  // What ACHIEVING the goal actually means — the concrete finish line / definition
+  // of done, distinct from `Goal.description` (what it is) and `motivation` (why it
+  // matters emotionally). This is the destination the AI plans TOWARD, so a vague
+  // goal still gets a sharp target. Optional; empty until the user fills it in.
+  successDefinition?: string;
   // Where the user is starting from on this specific goal (current level).
   startingLevel?: string;
   // What they have already done toward it.
@@ -209,6 +214,11 @@ export interface GoalContext {
   deadlineHardness: DeadlineHardness;
   // Why it matters — also fuels the "why it matters" framing elsewhere.
   motivation?: string;
+  // A LIVING note the user grows while working the goal ("what I've learned"):
+  // constraints discovered, direction that sharpened, dead ends. Fed into every AI
+  // call so future generations adapt as understanding evolves — this is how a vague
+  // goal refines "on the way" without an explicit re-sharpen ritual.
+  learnings?: string;
   // Phase 10: the goal's generated Strategy Brief (Direction layer). Optional —
   // absent until it has been generated. Stored on this same per-goal row (no new
   // table, no index) so a goal's intake and its strategy live together.

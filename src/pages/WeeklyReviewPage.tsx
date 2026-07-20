@@ -13,6 +13,7 @@ import { useEffect, type ReactNode } from 'react'
 import { format, parseISO } from 'date-fns'
 import { useGoalStore } from '@/store/useGoalStore'
 import type { WeeklyReview } from '@/store/useGoalStore'
+import { RegistryPage, RegistrySection, LeaderRow } from '@/components/ui/Registry'
 
 export function WeeklyReviewPage() {
   const weeklyReview = useGoalStore((s) => s.weeklyReview)
@@ -24,39 +25,28 @@ export function WeeklyReviewPage() {
     void loadWeeklyReview()
   }, [loadWeeklyReview])
 
-  return (
-    <section className="mx-auto max-w-3xl">
-      <h1 className="text-2xl font-semibold text-app-text">Weekly review</h1>
-      <p className="mt-2 text-app-text-muted">
-        {weeklyReview
-          ? `Your week: ${formatDay(weeklyReview.windowStart)} – ${formatDay(
-              weeklyReview.windowEnd,
-            )}.`
-          : 'The last 7 days, including today.'}
-      </p>
+  const subtitle = weeklyReview
+    ? `Window · ${formatDay(weeklyReview.windowStart)} – ${formatDay(weeklyReview.windowEnd)}`
+    : 'The last 7 days, including today'
 
-      <div className="mt-6 space-y-4">
-        {isLoading && !weeklyReview ? (
-          <Card>
-            <p className="text-sm text-app-text-muted">Loading your week...</p>
-          </Card>
-        ) : !weeklyReview ? null : isEmptyWeek(weeklyReview) ? (
-          <Card>
-            <p className="text-sm text-app-text-muted">
-              Nothing to review yet — once you&rsquo;ve scheduled and completed
-              some tasks, your week will show up here.
-            </p>
-          </Card>
-        ) : (
-          <>
-            <MomentumTrend review={weeklyReview} />
-            <CompletedSummary review={weeklyReview} />
-            <StrengthenedSummary review={weeklyReview} />
-            <OpenSummary review={weeklyReview} />
-          </>
-        )}
-      </div>
-    </section>
+  return (
+    <RegistryPage kicker="LifeMap — Weekly Review" title="Weekly Review" subtitle={subtitle}>
+      {isLoading && !weeklyReview ? (
+        <Note>Compiling your week…</Note>
+      ) : !weeklyReview ? null : isEmptyWeek(weeklyReview) ? (
+        <Note>
+          Nothing to review yet — once you&rsquo;ve scheduled and completed some
+          tasks, your week will show up here.
+        </Note>
+      ) : (
+        <div className="space-y-10">
+          <MomentumTrend review={weeklyReview} />
+          <CompletedSummary review={weeklyReview} />
+          <StrengthenedSummary review={weeklyReview} />
+          <OpenSummary review={weeklyReview} />
+        </div>
+      )}
+    </RegistryPage>
   )
 }
 
@@ -72,32 +62,27 @@ function isEmptyWeek(r: WeeklyReview): boolean {
 
 function MomentumTrend({ review }: { review: WeeklyReview }) {
   return (
-    <Card>
-      <h2 className="text-lg font-semibold text-app-text">Daily momentum</h2>
-      <p className="mt-1 text-sm text-app-text-muted">
-        Share of each day&rsquo;s planned effort you completed.
-      </p>
-
-      <div className="mt-5 flex items-end justify-between gap-2">
+    <RegistrySection title="Daily Momentum" meta="Effort completed">
+      <div className="flex items-end justify-between gap-2 pt-1">
         {review.dailyMomentum.map((point) => (
           <div key={point.date} className="flex flex-1 flex-col items-center gap-2">
-            <span className="text-[11px] tabular-nums text-app-text-muted">
+            <span className="font-mono text-[10px] tabular-nums text-app-text-muted">
               {point.percent}%
             </span>
-            {/* Fixed-height track with a fill rising to the day's percent. */}
-            <div className="flex h-24 w-full items-end overflow-hidden rounded-md bg-app-surface-alt">
+            {/* Fixed-height hairline track with an ink fill rising to the day's percent. */}
+            <div className="flex h-24 w-full items-end border border-app-border bg-app-surface-alt">
               <div
-                className="w-full rounded-md bg-app-primary transition-[height] duration-500 ease-out"
+                className="w-full bg-app-text transition-[height] duration-500 ease-out"
                 style={{ height: `${point.percent}%` }}
               />
             </div>
-            <span className="text-[11px] text-app-text-muted">
+            <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-app-text-muted">
               {format(parseISO(point.date), 'EEE')}
             </span>
           </div>
         ))}
       </div>
-    </Card>
+    </RegistrySection>
   )
 }
 
@@ -105,30 +90,29 @@ function CompletedSummary({ review }: { review: WeeklyReview }) {
   const count = review.completedTasks.length
 
   return (
-    <Card>
-      <h2 className="text-lg font-semibold text-app-text">Completed</h2>
-      <p className="mt-1 text-sm text-app-text-muted">
+    <RegistrySection
+      title="Completed"
+      meta={`${count} ${plural(count, 'task')}`}
+      weight="hair"
+    >
+      <p className="text-sm text-app-text-muted">
         {count === 0
           ? 'No tasks completed in this window yet.'
           : `${count} ${plural(count, 'task')} completed this week.`}
       </p>
 
       {review.completedByGoal.length > 0 ? (
-        <ul className="mt-4 space-y-2">
+        <div className="mt-3">
           {review.completedByGoal.map((g) => (
-            <li
+            <LeaderRow
               key={g.goalTitle}
-              className="flex items-center justify-between gap-3 text-sm"
-            >
-              <span className="truncate text-app-text">{g.goalTitle}</span>
-              <span className="shrink-0 text-app-text-muted">
-                {g.count} {plural(g.count, 'task')}
-              </span>
-            </li>
+              label={g.goalTitle}
+              value={`${g.count} ${plural(g.count, 'task')}`}
+            />
           ))}
-        </ul>
+        </div>
       ) : null}
-    </Card>
+    </RegistrySection>
   )
 }
 
@@ -141,31 +125,23 @@ function StrengthenedSummary({ review }: { review: WeeklyReview }) {
   if (foundations.length === 0) return null
 
   return (
-    <Card>
-      <h2 className="text-lg font-semibold text-app-text">
-        Foundations you strengthened
-      </h2>
+    <RegistrySection title="Foundations Strengthened" weight="hair">
       {/* One sentence: progress here lifts everything resting on it. */}
-      <p className="mt-1 text-sm text-app-text-muted">
+      <p className="text-sm text-app-text-muted">
         Work you finished this week strengthened {foundations.length}{' '}
         {plural(foundations.length, 'subgoal')} that other subgoals build on.
       </p>
 
-      <ul className="mt-4 space-y-2">
+      <div className="mt-3">
         {foundations.map((f) => (
-          <li
+          <LeaderRow
             key={f.subgoalTitle}
-            className="flex items-center justify-between gap-3 text-sm"
-          >
-            <span className="truncate text-app-text">{f.subgoalTitle}</span>
-            <span className="shrink-0 text-app-text-muted">
-              lifts {f.activeSupportCount} active{' '}
-              {plural(f.activeSupportCount, 'subgoal')}
-            </span>
-          </li>
+            label={f.subgoalTitle}
+            value={`lifts ${f.activeSupportCount} active`}
+          />
         ))}
-      </ul>
-    </Card>
+      </div>
+    </RegistrySection>
   )
 }
 
@@ -173,10 +149,9 @@ function OpenSummary({ review }: { review: WeeklyReview }) {
   const count = review.missedTasks.length
 
   return (
-    <Card>
-      <h2 className="text-lg font-semibold text-app-text">Still open</h2>
+    <RegistrySection title="Still Open" meta={`${count} ${plural(count, 'task')}`} weight="hair">
       {/* Neutral, forward-looking framing — never "missed" or "failed". */}
-      <p className="mt-1 text-sm text-app-text-muted">
+      <p className="text-sm text-app-text-muted">
         {count === 0
           ? 'Nothing from this week is still open — you stayed on top of it.'
           : `${count} ${plural(count, 'task')} from this week ${
@@ -185,15 +160,13 @@ function OpenSummary({ review }: { review: WeeklyReview }) {
               count === 1 ? 'it' : 'them'
             } whenever it suits you.`}
       </p>
-    </Card>
+    </RegistrySection>
   )
 }
 
-function Card({ children }: { children: ReactNode }) {
-  // Spacing between cards is owned by the parent's space-y; the card itself is
-  // margin-free.
+function Note({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-app-lg border border-app-border bg-app-surface p-6">
+    <div className="border border-app-border bg-app-surface p-8 text-sm text-app-text-muted">
       {children}
     </div>
   )

@@ -105,6 +105,9 @@ export interface AIUserContext {
 }
 
 export interface AIGoalContext {
+  // What achieving the goal actually means — the concrete finish line the plan
+  // aims at (distinct from the goal's description and the user's motivation).
+  successDefinition?: string
   // Where the user is starting from on this goal (current level).
   startingLevel?: string
   // What they have already done toward it.
@@ -113,6 +116,9 @@ export interface AIGoalContext {
   deadlineHardness?: DeadlineHardness
   // Why it matters to them.
   motivation?: string
+  // The user's living "what I've learned" note on this goal — constraints and
+  // direction that emerged while working it, so generation adapts as they learn.
+  learnings?: string
 }
 
 // ── Feature: milestone suggestions ───────────────────────────────────────────
@@ -247,6 +253,11 @@ export interface DailyPlanContext {
   // generation stays coherent with reality without ever sending task history. Its
   // size is bounded by the plan's shape, not by how much history has accrued.
   digest?: RoadmapDigest
+  // Task titles already planned elsewhere in THIS goal (the digest carries only
+  // counts, so without this the model can't see siblings' actual tasks and would
+  // regenerate the same first steps). De-dup context: "do not repeat these". Bounded
+  // by the plan's shape (generation-time only), so it keeps the flat-cost principle.
+  plannedElsewhere?: string[]
 }
 
 // One scheduled daily task, ready for the existing addTask path. scheduledDate is

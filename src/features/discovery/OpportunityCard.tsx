@@ -62,35 +62,32 @@ export function OpportunityCard({ opportunity, goalTitleById }: OpportunityCardP
   }
 
   return (
-    <article className="rounded-app-lg border border-app-border bg-app-surface p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <span className="rounded-full border border-app-border px-2 py-0.5 text-[11px] font-medium text-app-text-muted">
-            {OPPORTUNITY_TYPE_LABELS[opportunity.type]}
-          </span>
+    <article className="border border-app-border bg-app-surface p-5">
+      <div className="flex items-start justify-between gap-3 font-mono text-[10px] uppercase tracking-[0.14em] text-app-text-muted">
+        <div className="flex items-center gap-3">
+          <span>{OPPORTUNITY_TYPE_LABELS[opportunity.type]}</span>
           {opportunity.source === 'ai_search' ? (
-            <span
-              title="Found by AI discovery"
-              className="inline-flex items-center gap-1 rounded-full border border-app-border px-2 py-0.5 text-[11px] text-app-text-muted"
-            >
+            <span title="Found by AI discovery" className="inline-flex items-center gap-1">
               <Sparkles size={11} aria-hidden="true" />
               AI
             </span>
           ) : null}
         </div>
         <span
-          className={[
-            'shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium',
-            band.strong
-              ? 'bg-app-surface-alt text-app-primary'
-              : 'border border-app-border text-app-text-muted',
-          ].join(' ')}
+          className={`inline-flex shrink-0 items-center gap-1.5 ${
+            band.strong ? 'text-app-text' : 'text-app-text-muted'
+          }`}
         >
+          {band.strong ? (
+            <span className="h-1.5 w-1.5 bg-app-text" aria-hidden="true" />
+          ) : null}
           {band.label}
         </span>
       </div>
 
-      <h3 className="mt-2 text-sm font-semibold text-app-text">{opportunity.title}</h3>
+      <h3 className="mt-3 font-display text-base font-semibold text-app-text">
+        {opportunity.title}
+      </h3>
       <p className="mt-0.5 text-xs text-app-text-muted">{opportunity.organization}</p>
 
       {opportunity.description ? (
@@ -119,11 +116,13 @@ export function OpportunityCard({ opportunity, goalTitleById }: OpportunityCardP
           supports. Hidden entirely when nothing matched (no empty "Matches:"). */}
       {matchedTitles.length > 0 ? (
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          <span className="text-xs text-app-text-muted">Supports</span>
+          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-app-text-muted">
+            Supports
+          </span>
           {matchedTitles.map((title) => (
             <span
               key={title}
-              className="rounded-full bg-app-surface-alt px-2 py-0.5 text-[11px] text-app-text"
+              className="border border-app-border px-2 py-0.5 text-[11px] text-app-text"
             >
               {title}
             </span>
@@ -137,7 +136,7 @@ export function OpportunityCard({ opportunity, goalTitleById }: OpportunityCardP
             href={linkUrl}
             target="_blank"
             rel="noreferrer noopener"
-            className="inline-flex items-center gap-1.5 rounded-app-lg border border-app-border px-3 py-1.5 text-xs font-medium text-app-text transition hover:bg-app-border/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+            className="inline-flex items-center gap-1.5 border border-app-border px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-app-text transition hover:bg-app-surface-alt focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
           >
             <ExternalLink size={13} aria-hidden="true" />
             Open
@@ -145,7 +144,7 @@ export function OpportunityCard({ opportunity, goalTitleById }: OpportunityCardP
         ) : null}
 
         {opportunity.addedToRoadmap ? (
-          <span className="inline-flex items-center gap-1.5 rounded-app-lg px-3 py-1.5 text-xs font-medium text-app-primary">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-app-text-muted">
             <Check size={13} aria-hidden="true" />
             Added to plan
           </span>
@@ -153,7 +152,7 @@ export function OpportunityCard({ opportunity, goalTitleById }: OpportunityCardP
           <button
             type="button"
             onClick={() => setIsPlanOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-app-lg bg-app-text px-3 py-1.5 text-xs font-semibold text-app-surface transition hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+            className="inline-flex items-center gap-1.5 bg-app-text px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-app-surface transition hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
           >
             <Check size={13} aria-hidden="true" />
             Add to plan
@@ -164,7 +163,7 @@ export function OpportunityCard({ opportunity, goalTitleById }: OpportunityCardP
           type="button"
           disabled={isBusy}
           onClick={() => runAction(() => dismissOpportunity(opportunity.id))}
-          className="inline-flex items-center gap-1.5 rounded-app-lg px-3 py-1.5 text-xs font-medium text-app-text-muted transition hover:text-app-text disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-app-text-muted transition hover:text-app-text disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
         >
           <X size={13} aria-hidden="true" />
           Dismiss
@@ -207,7 +206,7 @@ function RemoveButton({
         type="button"
         disabled={disabled}
         onClick={() => setConfirming(true)}
-        className="text-xs font-medium text-app-text-muted transition hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+        className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-app-text-muted transition hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
       >
         Remove
       </button>
@@ -215,12 +214,12 @@ function RemoveButton({
   }
 
   return (
-    <div className="flex items-center gap-2 text-xs">
+    <div className="flex items-center gap-2 font-mono text-[10px] font-semibold uppercase tracking-[0.12em]">
       <button
         type="button"
         disabled={disabled}
         onClick={onConfirm}
-        className="font-semibold text-red-600 transition hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/30"
+        className="text-red-600 transition hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/30"
       >
         Confirm
       </button>

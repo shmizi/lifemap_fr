@@ -7,7 +7,7 @@ import { Sun, Moon } from 'lucide-react'
 import { useUIStore } from '@/store/useUIStore'
 
 const segmentBase =
-  'flex flex-1 items-center justify-center gap-2 rounded-app-lg px-4 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30'
+  'flex flex-1 items-center justify-center gap-2 px-4 py-2 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] transition focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30'
 
 export function AppearanceSection() {
   const theme = useUIStore((s) => s.theme)
@@ -19,16 +19,19 @@ export function AppearanceSection() {
   }
 
   return (
-    <section className="rounded-app-lg border border-app-border bg-app-surface p-6">
-      <h2 className="text-base font-semibold text-app-text">Appearance</h2>
-      <p className="mt-1 text-sm text-app-text-muted">
+    <section className="border border-app-border bg-app-surface p-6">
+      <h2 className="font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-app-text">
+        Appearance
+      </h2>
+      <div className="mt-2 border-t border-app-border" />
+      <p className="pt-3 text-sm text-app-text-muted">
         Choose how LifeMap looks on this device.
       </p>
 
       <div
         role="radiogroup"
         aria-label="Theme"
-        className="mt-5 flex gap-2 rounded-app-lg border border-app-border bg-app-surface-alt p-1"
+        className="mt-5 flex gap-1 border border-app-border bg-app-surface-alt p-1"
       >
         <button
           type="button"

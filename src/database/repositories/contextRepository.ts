@@ -121,6 +121,30 @@ export async function saveStrategyBrief(
 }
 
 /**
+ * Update ONLY a goal's living "what I've learned" note, preserving every other
+ * intake field (read-modify-write, not a blind replace — same discipline as
+ * saveStrategyBrief). Creates the row with a soft-deadline default if none exists.
+ * A blank note clears the field. createdAt preserved, updatedAt refreshed.
+ */
+export async function saveGoalLearnings(
+  goalId: ID,
+  learnings: string,
+): Promise<GoalContext> {
+  const now = new Date().toISOString();
+  const existing = await db.goalContext.get(goalId);
+  const context: GoalContext = {
+    goalId,
+    deadlineHardness: 'soft',
+    ...existing,
+    learnings: learnings.trim() || undefined,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  };
+  await db.goalContext.put(context);
+  return context;
+}
+
+/**
  * Remove one goal's intake context. Plain leaf delete — called when its goal is
  * deleted so a goalContext row never outlives the goal it describes. Idempotent
  * (deleting a missing key is a no-op in Dexie).

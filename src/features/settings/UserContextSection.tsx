@@ -85,9 +85,12 @@ export function UserContextSection({ context }: UserContextSectionProps) {
   }
 
   return (
-    <section className="rounded-app-lg border border-app-border bg-app-surface p-6">
-      <h2 className="text-base font-semibold text-app-text">About you</h2>
-      <p className="mt-1 text-sm text-app-text-muted">
+    <section className="border border-app-border bg-app-surface p-6">
+      <h2 className="font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-app-text">
+        About You
+      </h2>
+      <div className="mt-2 border-t border-app-border" />
+      <p className="pt-3 text-sm text-app-text-muted">
         Context the AI uses to tailor your roadmaps to how you actually live.
       </p>
 
@@ -132,10 +135,10 @@ export function UserContextSection({ context }: UserContextSectionProps) {
                   type="button"
                   onClick={() => toggleLightDay(index)}
                   aria-pressed={active}
-                  className={`rounded-app-lg border px-3 py-1.5 text-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30 ${
+                  className={`border px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.1em] transition focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30 ${
                     active
                       ? 'border-app-text bg-app-text text-app-surface'
-                      : 'border-app-border text-app-text hover:bg-app-border/30'
+                      : 'border-app-border text-app-text hover:bg-app-surface-alt'
                   }`}
                 >
                   {label}
@@ -195,15 +198,17 @@ export function UserContextSection({ context }: UserContextSectionProps) {
 
       <div className="mt-6 flex items-center justify-end gap-3">
         {justSaved ? (
-          <span className="text-sm text-app-text-muted">Saved</span>
+          <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-app-text-muted">
+            Saved
+          </span>
         ) : null}
         <button
           type="button"
           onClick={handleSave}
           disabled={isSaving}
-          className="rounded-app-lg bg-app-text px-4 py-2 text-sm font-semibold text-app-surface transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+          className="bg-app-text px-4 py-2 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-app-surface transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
         >
-          {isSaving ? 'Saving...' : 'Save'}
+          {isSaving ? 'Saving…' : 'Save'}
         </button>
       </div>
     </section>

@@ -55,7 +55,7 @@ export function Modal({
             // no way to reach the buttons. The header stays pinned; only the body
             // scrolls. flex-col + min-h-0 on the body is what makes the inner
             // overflow actually scroll inside a flex container.
-            className={`relative flex max-h-[88vh] w-full flex-col ${maxWidth} rounded-app-lg border border-app-border bg-app-surface p-6 shadow-xl`}
+            className={`relative flex max-h-[88vh] w-full flex-col ${maxWidth} border border-app-border bg-app-surface p-6 shadow-pop`}
             initial={{ opacity: 0, scale: 0.97, y: 8 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.97, y: 8 }}
@@ -64,13 +64,15 @@ export function Modal({
               if (e.key === 'Escape') onClose()
             }}
           >
-            <div className="flex shrink-0 items-center justify-between">
-              <h2 className="text-lg font-semibold text-app-text">{title}</h2>
+            <div className="flex shrink-0 items-center justify-between border-b-2 border-app-rule pb-3">
+              <h2 className="font-display text-xl font-semibold tracking-tight text-app-text">
+                {title}
+              </h2>
               <button
                 type="button"
                 onClick={onClose}
                 aria-label="Close"
-                className="rounded-md p-1 text-app-text-muted transition hover:text-app-text focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+                className="p-1 text-app-text-muted transition hover:text-app-text focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
               >
                 <X size={18} />
               </button>

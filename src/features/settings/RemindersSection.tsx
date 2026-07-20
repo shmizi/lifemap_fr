@@ -12,7 +12,7 @@ import {
 } from '@/core/utils/notifications'
 
 const segmentBase =
-  'flex flex-1 items-center justify-center gap-2 rounded-app-lg px-4 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30 disabled:cursor-not-allowed disabled:opacity-40'
+  'flex flex-1 items-center justify-center gap-2 px-4 py-2 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] transition focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30 disabled:cursor-not-allowed disabled:opacity-40'
 
 export function RemindersSection() {
   const remindersEnabled = useUIStore((s) => s.remindersEnabled)
@@ -47,9 +47,12 @@ export function RemindersSection() {
   }
 
   return (
-    <section className="rounded-app-lg border border-app-border bg-app-surface p-6">
-      <h2 className="text-base font-semibold text-app-text">Reminders</h2>
-      <p className="mt-1 text-sm text-app-text-muted">
+    <section className="border border-app-border bg-app-surface p-6">
+      <h2 className="font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-app-text">
+        Reminders
+      </h2>
+      <div className="mt-2 border-t border-app-border" />
+      <p className="pt-3 text-sm text-app-text-muted">
         Gentle nudges about today&apos;s and overdue tasks — morning, afternoon,
         and evening, while LifeMap is open on this device.
       </p>
@@ -57,7 +60,7 @@ export function RemindersSection() {
       <div
         role="radiogroup"
         aria-label="Task reminders"
-        className="mt-5 flex gap-2 rounded-app-lg border border-app-border bg-app-surface-alt p-1"
+        className="mt-5 flex gap-1 border border-app-border bg-app-surface-alt p-1"
       >
         <button
           type="button"

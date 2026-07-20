@@ -45,7 +45,7 @@ describe('buildMilestonePrompt', () => {
 
   it('omits the description line when the subgoal description is blank', () => {
     const text = userText({ ...base, subgoalDescription: '   ' })
-    expect(text).not.toContain('Subgoal description:')
+    expect(text).not.toContain('What completing this subgoal looks like:')
   })
 
   it('lists existing milestone titles so they are not repeated', () => {

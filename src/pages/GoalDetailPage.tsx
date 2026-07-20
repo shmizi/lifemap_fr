@@ -21,7 +21,6 @@ import { format, parseISO } from 'date-fns'
 import { ROUTES, GOAL_CATEGORY_OPTIONS } from '@/core/constants'
 import { googleCalendarUrl } from '@/core/utils/googleCalendar'
 import { useGoalTree } from '@/core/hooks/useGoalTree'
-import { useDependencyGraph } from '@/core/hooks/useDependencyGraph'
 import { useGoalStore } from '@/store/useGoalStore'
 import { ProgressRing } from '@/components/progress/ProgressRing'
 import { SubgoalSection } from '@/features/goals/SubgoalSection'
@@ -29,6 +28,7 @@ import { StrategyBriefPanel } from '@/features/goals/StrategyBriefPanel'
 import { ScopeCutNudge } from '@/features/goals/ScopeCutNudge'
 import { StructureReviewModal } from '@/features/goals/StructureReviewModal'
 import { SubgoalCreationModal } from '@/features/goals/SubgoalCreationModal'
+import { GoalLearningsPanel } from '@/features/goals/GoalLearningsPanel'
 import { SuggestedSubgoalsModal } from '@/features/goals/SuggestedSubgoalsModal'
 import { GoalCreationModal } from '@/features/goals/GoalCreationModal'
 import type { Goal } from '@/core/types'
@@ -43,19 +43,6 @@ export function GoalDetailPage() {
   // the (in practice unreachable) empty case.
   const { id = '' } = useParams<{ id: string }>()
   const { tree, isLoading } = useGoalTree(id)
-  // The subgoal dependency graph (loaded here, passed down to each section).
-  // Edges are global across goals; a section filters to its own subgoal by id.
-  // Keyed on the goal's subgoal-id set so that deleting a subgoal (which
-  // cascade-removes its edges in the DB via useGoalStore) forces a reload here,
-  // dropping any now-dangling edges rather than showing a phantom "Unknown
-  // subgoal" row.
-  const subgoalIdsKey = tree
-    ? tree.subgoals.map((st) => st.subgoal.id).join(',')
-    : ''
-  const { dependencies: subgoalDependencies } = useDependencyGraph(
-    'subgoal',
-    subgoalIdsKey,
-  )
   // Whole-goal momentum, derived from the same tree by the store. Shown in the
   // header above the per-subgoal rings; hidden until the goal has tasks.
   const goalProgress = useGoalStore((s) => s.currentGoalProgress)
@@ -121,12 +108,6 @@ export function GoalDetailPage() {
     goalDeadlineHardness === 'hard' &&
     goalProjection !== null &&
     goalProjection.daysBehind > 0
-  // Flat {id, title} list of this goal's subgoals, for each section's dependency
-  // picker and supporter-title lookup.
-  const allSubgoals = subgoals.map((st) => ({
-    id: st.subgoal.id,
-    title: st.subgoal.title,
-  }))
 
   // Overdue = scheduled before today AND not yet completed (missed work). Derived
   // read-only from the loaded tree; drives the reschedule nudge below.
@@ -188,15 +169,17 @@ export function GoalDetailPage() {
       {/* Goal header */}
       <header className="mt-4 rounded-app-lg border border-app-border bg-app-surface p-6">
         <div className="flex items-start justify-between gap-3">
-          <h1 className="text-2xl font-semibold text-app-text">{goal.title}</h1>
-          <div className="flex shrink-0 items-center gap-2">
-            <span className="rounded-full border border-app-border px-2.5 py-0.5 text-xs text-app-text-muted">
+          <h1 className="font-display text-3xl font-semibold leading-tight tracking-tight text-app-text">
+            {goal.title}
+          </h1>
+          <div className="flex shrink-0 items-center gap-3">
+            <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-app-text-muted">
               {categoryLabel(goal.category)}
             </span>
             <button
               type="button"
               onClick={() => setIsEditGoalOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-app-lg border border-app-border px-3 py-1.5 text-sm font-medium text-app-text transition hover:bg-app-border/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+              className="inline-flex items-center gap-1.5 border border-app-border px-3 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-app-text transition hover:bg-app-surface-alt focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
             >
               <Pencil size={14} />
               Edit
@@ -211,7 +194,7 @@ export function GoalDetailPage() {
             type="button"
             onClick={handleGenerateRoadmap}
             disabled={isGenerating}
-            className="inline-flex items-center gap-2 rounded-app-lg bg-app-text px-4 py-2 text-sm font-semibold text-app-surface transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+            className="inline-flex items-center gap-2 bg-app-text px-4 py-2 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-app-surface transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
           >
             <Sparkles size={16} />
             {isGenerating ? 'Building your roadmap…' : 'Generate roadmap with AI'}
@@ -247,10 +230,8 @@ export function GoalDetailPage() {
           </div>
         ) : null}
 
-        <div className="mt-4 flex items-center gap-3">
-          <p className="text-xs text-app-text-muted">
-            Target {format(parseISO(goal.targetDate), 'd MMM yyyy')}
-          </p>
+        <div className="mt-4 flex items-center gap-4 font-mono text-[10px] uppercase tracking-[0.14em] text-app-text-muted">
+          <p>Target {format(parseISO(goal.targetDate), 'd MMM yyyy')}</p>
           <a
             href={googleCalendarUrl({
               title: `Deadline: ${goal.title}`,
@@ -259,7 +240,7 @@ export function GoalDetailPage() {
             })}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-xs text-app-text-muted transition hover:text-app-text focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+            className="inline-flex items-center gap-1 transition hover:text-app-text focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
           >
             <CalendarPlus size={13} aria-hidden />
             Add to Google Calendar
@@ -282,7 +263,7 @@ export function GoalDetailPage() {
             type="button"
             onClick={handleReschedule}
             disabled={isRescheduling}
-            className="inline-flex items-center gap-1.5 rounded-app-lg border border-app-border px-3 py-1.5 text-sm font-medium text-app-text transition hover:bg-app-border/30 disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+            className="inline-flex items-center gap-1.5 border border-app-border px-3 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-app-text transition hover:bg-app-surface-alt disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
           >
             <CalendarClock size={15} aria-hidden />
             {isRescheduling ? 'Rescheduling…' : 'Reschedule onto upcoming days'}
@@ -303,17 +284,22 @@ export function GoalDetailPage() {
           "what am I really aiming at?" before "what do I do?". */}
       <StrategyBriefPanel goalId={goal.id} />
 
+      {/* Living "what I've learned" note — refines the goal on the way by feeding
+          the user's evolving understanding into every AI generation. key resets
+          the local editor state when navigating between goals. */}
+      <GoalLearningsPanel key={goal.id} goalId={goal.id} />
+
       {/* Subgoals */}
       <div className="mt-8">
         <div className="flex items-center justify-between gap-4">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-app-text-muted">
+          <h2 className="font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-app-text">
             Subgoals
           </h2>
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => setIsSuggestSubgoalsOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-app-lg border border-app-border px-3 py-1.5 text-sm font-medium text-app-text transition hover:bg-app-border/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+              className="inline-flex items-center gap-1.5 border border-app-border px-3 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-app-text transition hover:bg-app-surface-alt focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
             >
               <Sparkles size={15} />
               Suggest subgoals
@@ -321,7 +307,7 @@ export function GoalDetailPage() {
             <button
               type="button"
               onClick={() => setIsAddSubgoalOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-app-lg border border-app-border px-3 py-1.5 text-sm font-medium text-app-text transition hover:bg-app-border/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+              className="inline-flex items-center gap-1.5 border border-app-border px-3 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-app-text transition hover:bg-app-surface-alt focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
             >
               <Plus size={15} />
               Add subgoal
@@ -339,7 +325,7 @@ export function GoalDetailPage() {
                 type="button"
                 onClick={handleGenerateRoadmap}
                 disabled={isGenerating}
-                className="inline-flex items-center gap-1.5 rounded-app-lg bg-app-text px-4 py-2 text-sm font-semibold text-app-surface transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+                className="inline-flex items-center gap-1.5 bg-app-text px-4 py-2 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-app-surface transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
               >
                 <Sparkles size={16} />
                 {isGenerating ? 'Building your roadmap…' : 'Generate roadmap with AI'}
@@ -347,7 +333,7 @@ export function GoalDetailPage() {
               <button
                 type="button"
                 onClick={() => setIsStructureReviewOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-app-lg border border-app-border px-4 py-2 text-sm font-semibold text-app-text transition hover:bg-app-border/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+                className="inline-flex items-center gap-1.5 border border-app-border px-4 py-2 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-app-text transition hover:bg-app-surface-alt focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
               >
                 <Sparkles size={16} />
                 Generate structure only
@@ -355,7 +341,7 @@ export function GoalDetailPage() {
               <button
                 type="button"
                 onClick={() => setIsAddSubgoalOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-app-lg border border-app-border px-4 py-2 text-sm font-semibold text-app-text transition hover:bg-app-border/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+                className="inline-flex items-center gap-1.5 border border-app-border px-4 py-2 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-app-text transition hover:bg-app-surface-alt focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
               >
                 <Plus size={16} />
                 Add subgoal manually
@@ -370,8 +356,6 @@ export function GoalDetailPage() {
                 data={subgoalTree}
                 goalId={goal.id}
                 goalTitle={goal.title}
-                allSubgoals={allSubgoals}
-                subgoalDependencies={subgoalDependencies}
               />
             ))}
           </div>
@@ -419,9 +403,9 @@ function BackLink() {
   return (
     <Link
       to={ROUTES.GOALS}
-      className="inline-flex items-center gap-1.5 rounded text-sm text-app-text-muted transition hover:text-app-text focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+      className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.16em] text-app-text-muted transition hover:text-app-text focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
     >
-      <ArrowLeft size={16} />
+      <ArrowLeft size={14} />
       All goals
     </Link>
   )
@@ -429,7 +413,7 @@ function BackLink() {
 
 function CenteredNote({ children }: { children: ReactNode }) {
   return (
-    <div className="mt-6 rounded-app-lg border border-app-border bg-app-surface p-10 text-center text-sm text-app-text-muted">
+    <div className="mt-6 border border-app-border bg-app-surface p-10 text-center text-sm text-app-text-muted">
       {children}
     </div>
   )

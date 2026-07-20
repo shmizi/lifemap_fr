@@ -19,11 +19,12 @@ import { Trash2 } from 'lucide-react'
 import type { Goal } from '@/core/types'
 import { goalDetailPath, GOAL_CATEGORY_OPTIONS } from '@/core/constants'
 import { useGoalStore } from '@/store/useGoalStore'
-import { ProgressRing } from '@/components/progress/ProgressRing'
 import { GoalHealthBadge } from '@/components/cards/GoalHealthBadge'
 
 interface GoalCardProps {
   goal: Goal
+  // Position in the register, used only for the printed reference code.
+  index?: number
 }
 
 // Look up the display label for a category; fall back to the raw value so a
@@ -32,7 +33,7 @@ function categoryLabel(value: Goal['category']): string {
   return GOAL_CATEGORY_OPTIONS.find((o) => o.value === value)?.label ?? value
 }
 
-export function GoalCard({ goal }: GoalCardProps) {
+export function GoalCard({ goal, index }: GoalCardProps) {
   const setSelectedGoalId = useGoalStore((s) => s.setSelectedGoalId)
   const removeGoal = useGoalStore((s) => s.removeGoal)
   // Engine-computed momentum for this goal (the store builds it on load). May be
@@ -66,30 +67,38 @@ export function GoalCard({ goal }: GoalCardProps) {
     }
   }
 
+  const ref = index != null ? String(index + 1).padStart(3, '0') : null
+
   return (
-    <div className="group relative rounded-app-lg border border-app-border bg-app-surface transition duration-200 hover:-translate-y-0.5 hover:shadow-lg focus-within:shadow-lg">
+    <div className="group relative border border-app-border bg-app-surface transition-colors duration-200 hover:border-app-text/40 focus-within:border-app-text/40">
       <Link
         to={goalDetailPath(goal.id)}
         onClick={() => setSelectedGoalId(goal.id)}
-        className="block rounded-app-lg p-5 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+        className="block p-5 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
       >
         <div className="flex items-start justify-between gap-3">
-          <h3 className="text-base font-semibold text-app-text">{goal.title}</h3>
-          <div className="flex shrink-0 items-center gap-2">
+          <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-app-text-muted">
+            {ref ? `Ref. ${ref}` : categoryLabel(goal.category)}
+          </span>
+          <div className="flex shrink-0 items-center gap-3">
             {/* Pace health is meaningless for a finished goal — a completed or
                 archived goal is done, not "on track" — so the badge is hidden
                 for those (and for goals with no tasks to assess). */}
             {health && health.status !== 'no_tasks' && !isFinished ? (
               <GoalHealthBadge status={health.status} />
             ) : null}
-            <span className="rounded-full border border-app-border px-2.5 py-0.5 text-xs text-app-text-muted">
+            <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-app-text-muted">
               {categoryLabel(goal.category)}
             </span>
           </div>
         </div>
 
+        <h3 className="mt-3 font-display text-lg font-semibold leading-snug text-app-text">
+          {goal.title}
+        </h3>
+
         {goal.description ? (
-          <p className="mt-2 line-clamp-2 text-sm text-app-text-muted">
+          <p className="mt-1.5 line-clamp-2 text-sm text-app-text-muted">
             {goal.description}
           </p>
         ) : null}
@@ -134,17 +143,28 @@ export function GoalCard({ goal }: GoalCardProps) {
           </p>
         ) : null}
 
-        {/* Right padding leaves room for the delete control in this row. The
-            ring sits beside the target date so momentum and deadline read
-            together; it is hidden for a goal with no tasks. */}
-        <div className="mt-4 flex items-center gap-3 pr-20 text-xs text-app-text-muted">
-          {showRing ? (
-            <ProgressRing
-              percent={progress.percent}
-              ariaLabel={`${progress.completed} of ${progress.total} tasks complete`}
-            />
-          ) : null}
-          <span>Target {format(parseISO(goal.targetDate), 'd MMM yyyy')}</span>
+        {/* Momentum as a printed rule: an ink fill over a hairline track, with a
+            mono percent. Hidden for a goal with no tasks. */}
+        {showRing ? (
+          <div className="mt-4">
+            <div className="flex items-baseline justify-between font-mono text-[10px] uppercase tracking-[0.14em] text-app-text-muted">
+              <span>Progress</span>
+              <span
+                className="tabular-nums text-app-text"
+                aria-label={`${progress.completed} of ${progress.total} tasks complete`}
+              >
+                {progress.percent}%
+              </span>
+            </div>
+            <div className="mt-1.5 h-[3px] w-full bg-app-border">
+              <div className="h-[3px] bg-app-text" style={{ width: `${progress.percent}%` }} />
+            </div>
+          </div>
+        ) : null}
+
+        {/* Right padding leaves room for the delete control. */}
+        <div className="mt-4 pr-20 font-mono text-[10px] uppercase tracking-[0.14em] text-app-text-muted">
+          Target {format(parseISO(goal.targetDate), 'd MMM yyyy')}
         </div>
       </Link>
 
@@ -158,15 +178,15 @@ export function GoalCard({ goal }: GoalCardProps) {
               type="button"
               onClick={handleDelete}
               disabled={isDeleting}
-              className="rounded-md px-2 py-1 text-xs font-medium text-red-600 transition hover:bg-red-500/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40 disabled:opacity-50"
+              className="px-2 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-red-600 transition hover:bg-red-500/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40 disabled:opacity-50"
             >
-              {isDeleting ? 'Deleting...' : 'Delete'}
+              {isDeleting ? 'Deleting…' : 'Delete'}
             </button>
             <button
               type="button"
               onClick={() => setConfirming(false)}
               disabled={isDeleting}
-              className="rounded-md px-2 py-1 text-xs font-medium text-app-text-muted transition hover:text-app-text focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+              className="px-2 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-app-text-muted transition hover:text-app-text focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
             >
               Cancel
             </button>
@@ -176,7 +196,7 @@ export function GoalCard({ goal }: GoalCardProps) {
             type="button"
             onClick={() => setConfirming(true)}
             aria-label={`Delete goal: ${goal.title}`}
-            className="rounded-md p-1.5 text-app-text-muted transition hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30 can-hover:opacity-0 can-hover:focus-visible:opacity-100 can-hover:group-hover:opacity-100"
+            className="p-1.5 text-app-text-muted transition hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30 can-hover:opacity-0 can-hover:focus-visible:opacity-100 can-hover:group-hover:opacity-100"
           >
             <Trash2 size={16} />
           </button>

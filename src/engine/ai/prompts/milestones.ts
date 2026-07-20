@@ -57,7 +57,7 @@ export function buildMilestonePrompt(
     `Subgoal: ${subgoalTitle}`,
   ]
   if (subgoalDescription.trim().length > 0) {
-    lines.push(`Subgoal description: ${subgoalDescription.trim()}`)
+    lines.push(`What completing this subgoal looks like: ${subgoalDescription.trim()}`)
   }
   // Personalization: who this is for and where they stand on the parent goal.
   lines.push(...renderUserContextLines(userContext))

@@ -44,7 +44,6 @@ export function AppLayout() {
 
   return (
     <div className="min-h-screen bg-app-bg text-app-text">
-      <TopoBackground />
       {/* First-run onboarding overlay; renders nothing once the user has a
           context row (i.e. has been through, or skipped, the flow). */}
       <OnboardingGate />
@@ -75,39 +74,6 @@ export function AppLayout() {
         </main>
       </div>
     </div>
-  )
-}
-
-// Faint topographic contour texture behind the whole app. Purely decorative
-// (pointer-events-none, aria-hidden); drawn under the content/sidebar so it adds
-// paper-map depth without affecting any interaction. Colour comes from the
-// --topo-line token so it adapts to light/dark.
-function TopoBackground() {
-  return (
-    <svg
-      className="pointer-events-none fixed inset-0 z-0 h-full w-full"
-      aria-hidden
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <defs>
-        <pattern
-          id="topo-contours"
-          x="0"
-          y="0"
-          width="320"
-          height="220"
-          patternUnits="userSpaceOnUse"
-        >
-          <g fill="none" stroke="var(--topo-line)" strokeWidth="1.5">
-            <path d="M-20,40 Q80,0 180,46 T380,40" />
-            <path d="M-20,90 Q80,50 180,96 T380,90" />
-            <path d="M-20,140 Q90,100 200,150 T400,140" />
-            <path d="M-20,190 Q80,150 180,196 T380,190" />
-          </g>
-        </pattern>
-      </defs>
-      <rect width="100%" height="100%" fill="url(#topo-contours)" />
-    </svg>
   )
 }
 

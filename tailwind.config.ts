@@ -18,6 +18,7 @@ const config: Config = {
         'app-primary-h':   'var(--color-primary-hover)',
         'app-secondary':   'var(--color-secondary)',
         'app-border':      'var(--color-border)',
+        'app-rule':        'var(--color-rule)',
         'app-warning':     'var(--color-warning)',
         'app-danger':      'var(--color-danger)',
 
@@ -35,9 +36,12 @@ const config: Config = {
         'accent-settings':       'var(--accent-settings)',
         'accent-settings-wash':  'var(--accent-settings-wash)',
       },
+      // EDITORIAL REGISTRY: paper is cut with a blade, not rounded. Corners are
+      // square. (Explicit rounded-full on checkboxes/dots is left untouched — those
+      // are deliberate circular marks, not panels.)
       borderRadius: {
-        'app': '10px',
-        'app-lg': '16px',
+        'app': '0px',
+        'app-lg': '0px',
       },
       fontFamily: {
         // `sans` stays the default body face; `display` is the literary serif

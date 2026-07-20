@@ -41,9 +41,17 @@
     --accent-discovery-wash: #E9E0EE;
     --accent-settings-wash:  #E4E6E9;
 
-    /* Elevation — soft, paper-like. */
-    --shadow-card: 0 1px 2px rgba(31,45,51,.05), 0 10px 28px -18px rgba(31,45,51,.28);
-    --shadow-pop:  0 20px 44px -22px rgba(31,45,51,.50);
+    /* Elevation — EDITORIAL REGISTRY: paper has no float. Cards sit flat on the
+       sheet and are separated by hairline rules, never shadow. --shadow-card is
+       kept as a token (many components reference it) but resolves to nothing.
+       --shadow-pop stays subtle, reserved for true overlays (modals). */
+    --shadow-card: none;
+    --shadow-pop:  0 20px 44px -22px rgba(31,45,51,.40);
+
+    /* Strong "masthead" rule — the heavy black line under a section title, as in
+       a printed index. Distinct from --color-border, which is the thin card
+       hairline. */
+    --color-rule:         #1F2D33;
 
     /* Type roles */
     --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
@@ -98,8 +106,9 @@
     --accent-discovery-wash: #272131;
     --accent-settings-wash:  #23272C;
 
-    --shadow-card: 0 1px 2px rgba(0,0,0,.30), 0 12px 30px -18px rgba(0,0,0,.65);
+    --shadow-card: none;
     --shadow-pop:  0 22px 48px -20px rgba(0,0,0,.75);
+    --color-rule:  #ECE6D6;
 
     --topo-line: rgba(236,230,214,.05);
 

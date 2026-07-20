@@ -20,6 +20,7 @@ import {
   saveUserContext as saveUserContextRow,
   getGoalContext,
   saveGoalContext as saveGoalContextRow,
+  saveGoalLearnings as saveGoalLearningsRow,
   type SaveUserContextInput,
   type SaveGoalContextInput,
 } from '@/database/repositories'
@@ -42,6 +43,9 @@ interface ContextState {
   // goals exist). The goal modal reads this when editing, writes it on save.
   fetchGoalContext: (goalId: ID) => Promise<GoalContext | undefined>
   saveGoalContext: (input: SaveGoalContextInput) => Promise<GoalContext>
+  // Focused write for the living "what I've learned" note — preserves all other
+  // intake fields (read-modify-write in the repository).
+  saveGoalLearnings: (goalId: ID, learnings: string) => Promise<GoalContext>
 }
 
 export const useContextStore = create<ContextState>()((set) => ({
@@ -79,4 +83,8 @@ export const useContextStore = create<ContextState>()((set) => ({
   // Write-through: no cached slot to update, so this just persists. The goal modal
   // calls it after addGoal/editGoal with the new goalId.
   saveGoalContext: async (input) => saveGoalContextRow(input),
+
+  // Write-through for just the learnings note (the goal-detail inline editor).
+  saveGoalLearnings: async (goalId, learnings) =>
+    saveGoalLearningsRow(goalId, learnings),
 }))

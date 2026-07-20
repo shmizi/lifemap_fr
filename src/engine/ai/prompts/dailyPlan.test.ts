@@ -25,6 +25,22 @@ describe('buildDailyPlanPrompt', () => {
     expect(request.messages[0].role).toBe('user')
   })
 
+  it('lists titles already planned elsewhere so the model does not duplicate them', () => {
+    const text = userText({
+      ...base,
+      plannedElsewhere: ['Map robotics & AI faculty at target universities'],
+    })
+    expect(text).toContain('Already planned elsewhere')
+    expect(text).toContain('- Map robotics & AI faculty at target universities')
+  })
+
+  it('omits the de-dup block when nothing is planned elsewhere', () => {
+    expect(userText(base)).not.toContain('Already planned elsewhere')
+    expect(userText({ ...base, plannedElsewhere: [] })).not.toContain(
+      'Already planned elsewhere',
+    )
+  })
+
   it('carries the subgoal, goal, minutes, and day count into the message', () => {
     const text = userText(base)
     expect(text).toContain('Get German to B2')
@@ -89,7 +105,7 @@ describe('buildDailyPlanPrompt', () => {
 
   it('omits the description line when the subgoal description is blank', () => {
     expect(userText({ ...base, subgoalDescription: '  ' })).not.toContain(
-      'Subgoal description:',
+      'What completing this subgoal looks like:',
     )
   })
 })

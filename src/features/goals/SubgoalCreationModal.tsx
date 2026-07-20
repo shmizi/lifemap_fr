@@ -155,14 +155,21 @@ function SubgoalForm({
           />
         </Field>
 
-        <Field label="Description">
+        {/* The subgoal's DESTINATION — what reaching it looks like, not what it
+            involves (its milestones/tasks express the "how"). Stored on the same
+            `description` field, which already feeds the milestone + daily-plan
+            prompts, so a sharper target here directly sharpens what the AI builds. */}
+        <Field label="What are you moving toward?">
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={3}
-            placeholder="What does this part of the goal involve?"
+            placeholder="What will be true when this subgoal is done? e.g. 'Can hold a 20-minute conversation in German at B2 level.'"
             className={`${inputClass} resize-none`}
           />
+          <span className="mt-1.5 block text-xs text-app-text-muted">
+            Gives the AI a clear target for this part of the goal.
+          </span>
         </Field>
 
         <Field label="Target date (optional)">

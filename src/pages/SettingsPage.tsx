@@ -12,23 +12,23 @@ import { ProfileSection } from '@/features/settings/ProfileSection'
 import { UserContextSection } from '@/features/settings/UserContextSection'
 import { AppearanceSection } from '@/features/settings/AppearanceSection'
 import { RemindersSection } from '@/features/settings/RemindersSection'
+import { RegistryPage } from '@/components/ui/Registry'
 
 export function SettingsPage() {
   const { profile, isLoading } = useProfile()
   const { userContext, isLoading: isLoadingContext } = useUserContext()
 
   return (
-    <section className="mx-auto max-w-3xl">
-      <h1 className="text-2xl font-semibold text-app-text">Settings</h1>
-      <p className="mt-2 text-app-text-muted">
-        Your profile and how LifeMap looks.
-      </p>
-
-      <div className="mt-6 space-y-6">
+    <RegistryPage
+      kicker="LifeMap — Colophon"
+      title="Settings"
+      subtitle="Your profile and how LifeMap looks"
+    >
+      <div className="space-y-6">
         {isLoading ? (
-          <div className="rounded-app-lg border border-app-border bg-app-surface p-6">
-            <p className="animate-pulse text-sm text-app-text-muted">
-              Loading your profile...
+          <div className="border border-app-border bg-app-surface p-6">
+            <p className="animate-pulse font-mono text-[11px] uppercase tracking-[0.16em] text-app-text-muted">
+              Loading your profile…
             </p>
           </div>
         ) : (
@@ -41,9 +41,9 @@ export function SettingsPage() {
         )}
 
         {isLoadingContext ? (
-          <div className="rounded-app-lg border border-app-border bg-app-surface p-6">
-            <p className="animate-pulse text-sm text-app-text-muted">
-              Loading your context...
+          <div className="border border-app-border bg-app-surface p-6">
+            <p className="animate-pulse font-mono text-[11px] uppercase tracking-[0.16em] text-app-text-muted">
+              Loading your context…
             </p>
           </div>
         ) : (
@@ -56,6 +56,6 @@ export function SettingsPage() {
 
         <RemindersSection />
       </div>
-    </section>
+    </RegistryPage>
   )
 }

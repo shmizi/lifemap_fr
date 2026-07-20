@@ -37,15 +37,15 @@ export function RoadmapStationNode({ station }: RoadmapStationNodeProps) {
   return (
     <div
       title={tooltip || undefined}
-      className={`flex h-full w-full items-center gap-2 rounded-app-lg border bg-app-surface px-3 shadow-sm ${
-        isComplete ? 'border-app-secondary' : 'border-app-border'
+      className={`flex h-full w-full items-center gap-2.5 border bg-app-surface px-3 ${
+        isComplete ? 'border-app-text' : 'border-app-border'
       }`}
     >
-      {/* Status dot: a finished station reads as the calm secondary (green); an
-          in-progress one as the primary (purple). */}
+      {/* Status mark: a finished station is a filled ink square; an in-progress
+          one is a hollow outline. Monochrome — the register carries no pigment. */}
       <span
-        className={`h-2.5 w-2.5 shrink-0 rounded-full ${
-          isComplete ? 'bg-app-secondary' : 'bg-app-primary'
+        className={`h-2 w-2 shrink-0 ${
+          isComplete ? 'bg-app-text' : 'border border-app-text-muted'
         }`}
         aria-hidden="true"
       />
@@ -55,7 +55,7 @@ export function RoadmapStationNode({ station }: RoadmapStationNodeProps) {
         </span>
         {/* Mirror the dashboard's leverage caption when this station is
             foundational; otherwise just name its status. */}
-        <span className="block truncate text-[11px] text-app-text-muted">
+        <span className="block truncate font-mono text-[10px] uppercase tracking-[0.1em] text-app-text-muted">
           {activeSupportCount > 0
             ? `Supports ${activeSupportCount} active`
             : SUBGOAL_STATUS_LABELS[subgoal.status]}

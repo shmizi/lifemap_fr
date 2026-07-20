@@ -17,6 +17,7 @@ import { useGoalStore } from '@/store/useGoalStore'
 import { useRoadmap } from '@/core/hooks/useRoadmap'
 import { RoadmapView } from '@/features/roadmap/RoadmapView'
 import { ROUTES } from '@/core/constants'
+import { RegistryPage, RegistryButton } from '@/components/ui/Registry'
 
 export function RoadmapPage() {
   const goals = useGoalStore((s) => s.goals)
@@ -45,47 +46,43 @@ export function RoadmapPage() {
   const ready = roadmap !== null && roadmap.goalId === goalId
 
   return (
-    <section className="mx-auto max-w-3xl">
-      <header>
-        <h1 className="text-2xl font-semibold text-app-text">Roadmap</h1>
-        <p className="mt-1 text-app-text-muted">
-          How a goal&apos;s subgoals support one another, in the order that builds
-          momentum.
-        </p>
-      </header>
-
+    <RegistryPage
+      kicker="LifeMap — Dependency Plate"
+      title="Roadmap"
+      subtitle="How a goal's subgoals support one another"
+    >
       {isLoadingGoals && goals.length === 0 ? (
-        <CenteredNote>Loading your goals...</CenteredNote>
+        <CenteredNote>Plotting the plate…</CenteredNote>
       ) : goals.length === 0 ? (
-        <div className="mt-8 rounded-app-lg border border-dashed border-app-border bg-app-surface p-10 text-center">
-          <h2 className="text-base font-semibold text-app-text">
+        <div className="border border-dashed border-app-border bg-app-surface p-12 text-center">
+          <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-app-text-muted">
+            Nothing to plot
+          </p>
+          <h2 className="mt-3 font-display text-xl font-semibold text-app-text">
             No goals to map yet
           </h2>
           <p className="mx-auto mt-2 max-w-sm text-sm text-app-text-muted">
             Create a goal and break it into subgoals first — the roadmap shows how
             those subgoals connect.
           </p>
-          <Link
-            to={ROUTES.GOALS}
-            className="mt-5 inline-flex items-center gap-2 rounded-app-lg bg-app-text px-4 py-2 text-sm font-semibold text-app-surface transition hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
-          >
-            Go to goals
+          <Link to={ROUTES.GOALS} className="mt-5 inline-block">
+            <RegistryButton>Go to goals</RegistryButton>
           </Link>
         </div>
       ) : (
         <>
-          <div className="mt-6">
+          <div>
             <label
               htmlFor="roadmap-goal"
-              className="text-xs font-medium uppercase tracking-wide text-app-text-muted"
+              className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-app-text-muted"
             >
-              Goal
+              Plate
             </label>
             <select
               id="roadmap-goal"
               value={goalId}
               onChange={(e) => setPicked(e.target.value)}
-              className="mt-1.5 w-full rounded-app border border-app-border bg-app-surface px-3 py-2 text-sm text-app-text focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+              className="mt-1.5 w-full border border-app-border bg-app-surface px-3 py-2 text-sm text-app-text focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
             >
               {goals.map((goal) => (
                 <option key={goal.id} value={goal.id}>
@@ -96,19 +93,19 @@ export function RoadmapPage() {
           </div>
 
           {isLoading && !ready ? (
-            <CenteredNote>Mapping subgoals...</CenteredNote>
+            <CenteredNote>Mapping subgoals…</CenteredNote>
           ) : ready ? (
             <RoadmapView view={roadmap} />
           ) : null}
         </>
       )}
-    </section>
+    </RegistryPage>
   )
 }
 
 function CenteredNote({ children }: { children: ReactNode }) {
   return (
-    <div className="mt-6 rounded-app-lg border border-app-border bg-app-surface p-10 text-center text-sm text-app-text-muted">
+    <div className="mt-6 border border-app-border bg-app-surface p-10 text-center font-mono text-[11px] uppercase tracking-[0.16em] text-app-text-muted">
       {children}
     </div>
   )

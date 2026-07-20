@@ -15,11 +15,12 @@
 // subgoals/tasks answer "what do I do?".
 
 import { useState } from 'react'
-import { Compass, Sparkles } from 'lucide-react'
+import { Compass, Sparkles, ChevronDown, ChevronRight } from 'lucide-react'
 import type { ID } from '@/core/types'
 import type { IntakeExchange } from '@/engine/ai/types'
 import { useStrategyBrief } from '@/core/hooks/useStrategyBrief'
 import { useGoalStore } from '@/store/useGoalStore'
+import { useUIStore } from '@/store/useUIStore'
 import { StrategyIntakeModal } from '@/features/goals/StrategyIntakeModal'
 
 export function StrategyBriefPanel({ goalId }: { goalId: ID }) {
@@ -29,6 +30,11 @@ export function StrategyBriefPanel({ goalId }: { goalId: ID }) {
   const [isIntakeOpen, setIsIntakeOpen] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // The brief can be a long read; let the user fold it away to a single header row.
+  // The fold is an app-wide persisted preference (useUIStore), so it is remembered
+  // across goals and page reloads rather than resetting each visit.
+  const collapsed = useUIStore((s) => s.directionCollapsed)
+  const toggleCollapsed = useUIStore((s) => s.toggleDirectionCollapsed)
 
   // Called by the intake modal once it has collected answers (and after it closes).
   // The panel owns the async generation and its progress so no await spans the
@@ -58,13 +64,20 @@ export function StrategyBriefPanel({ goalId }: { goalId: ID }) {
   return (
     <section className="mt-4 rounded-app-lg border border-app-border bg-app-surface-alt p-5">
       <div className="flex items-start justify-between gap-3">
-        <h2 className="inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-app-text-muted">
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? 'Expand Direction' : 'Minimize Direction'}
+          className="inline-flex items-center gap-2 rounded-md text-sm font-semibold uppercase tracking-wide text-app-text-muted transition hover:text-app-text focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+        >
+          {collapsed ? <ChevronRight size={15} aria-hidden /> : <ChevronDown size={15} aria-hidden />}
           <Compass size={15} aria-hidden />
           Direction
-        </h2>
+        </button>
         {/* Regenerate is only offered once a brief exists and nothing is in flight;
             the empty state has its own primary button below. Both open the intake. */}
-        {brief && !isGenerating ? (
+        {brief && !isGenerating && !collapsed ? (
           <button
             type="button"
             onClick={() => setIsIntakeOpen(true)}
@@ -76,6 +89,8 @@ export function StrategyBriefPanel({ goalId }: { goalId: ID }) {
         ) : null}
       </div>
 
+      {collapsed ? null : (
+        <>
       {/* Generation in progress (owned here, not the modal). */}
       {isGenerating ? (
         <p className="mt-3 animate-pulse text-sm text-app-text-muted">
@@ -163,6 +178,8 @@ export function StrategyBriefPanel({ goalId }: { goalId: ID }) {
       ) : null}
 
       {error ? <p className="mt-3 text-xs text-red-600">{error}</p> : null}
+        </>
+      )}
 
       {/* Stage-0 intake conversation. It only collects answers and closes; this
           panel generates the brief from them (see handleBuild). */}

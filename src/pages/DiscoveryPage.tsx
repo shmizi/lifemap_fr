@@ -15,6 +15,7 @@ import { useDiscoveryStore } from '@/store/useDiscoveryStore'
 import { useOpportunities } from '@/core/hooks/useOpportunities'
 import { DiscoveryView } from '@/features/discovery/DiscoveryView'
 import { AddOpportunityModal } from '@/features/discovery/AddOpportunityModal'
+import { RegistryPage, RegistryButton } from '@/components/ui/Registry'
 
 export function DiscoveryPage() {
   const goals = useGoalStore((s) => s.goals)
@@ -54,28 +55,21 @@ export function DiscoveryPage() {
   }
 
   return (
-    <section className="mx-auto max-w-3xl">
-      <header className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-app-text">Discovery</h1>
-          <p className="mt-1 text-app-text-muted">
-            Real-world opportunities, matched to the goals you are working toward.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => setIsAddOpen(true)}
-          className="inline-flex shrink-0 items-center gap-2 rounded-app-lg bg-app-text px-4 py-2 text-sm font-semibold text-app-surface transition hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
-        >
-          <Plus size={16} aria-hidden="true" />
+    <RegistryPage
+      kicker="LifeMap — Field Dispatches"
+      title="Discovery"
+      subtitle="Real-world opportunities, matched to your goals"
+      actions={
+        <RegistryButton onClick={() => setIsAddOpen(true)}>
+          <Plus size={14} aria-hidden="true" />
           Add opportunity
-        </button>
-      </header>
-
+        </RegistryButton>
+      }
+    >
       {/* Discover bar: search the web (via the provider seam) for opportunities
           and add the relevant finds. Mocked today; a real provider drops in
           behind the same call. */}
-      <form onSubmit={handleDiscover} className="mt-6 flex items-center gap-2">
+      <form onSubmit={handleDiscover} className="flex items-center gap-2">
         <div className="relative flex-1">
           <Search
             size={16}
@@ -87,32 +81,34 @@ export function DiscoveryPage() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search opportunities, e.g. machine learning internships"
-            className="w-full rounded-app-lg border border-app-border bg-app-surface py-2 pl-9 pr-3 text-sm text-app-text placeholder:text-app-text-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+            className="w-full border border-app-border bg-app-surface py-2 pl-9 pr-3 text-sm text-app-text placeholder:text-app-text-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
           />
         </div>
-        <button
+        <RegistryButton
           type="submit"
+          variant="secondary"
           disabled={query.trim().length === 0 || isDiscovering}
-          className="inline-flex shrink-0 items-center gap-2 rounded-app-lg border border-app-border px-4 py-2 text-sm font-semibold text-app-text transition hover:bg-app-border/30 disabled:cursor-not-allowed disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
         >
-          {isDiscovering ? 'Searching...' : 'Discover'}
-        </button>
+          {isDiscovering ? 'Searching…' : 'Discover'}
+        </RegistryButton>
       </form>
 
-      {isLoading && opportunities.length === 0 ? (
-        <CenteredNote>Loading opportunities...</CenteredNote>
-      ) : (
-        <DiscoveryView opportunities={opportunities} goalTitleById={goalTitleById} />
-      )}
+      <div className="mt-6">
+        {isLoading && opportunities.length === 0 ? (
+          <CenteredNote>Scanning the dispatches…</CenteredNote>
+        ) : (
+          <DiscoveryView opportunities={opportunities} goalTitleById={goalTitleById} />
+        )}
+      </div>
 
       <AddOpportunityModal open={isAddOpen} onClose={() => setIsAddOpen(false)} />
-    </section>
+    </RegistryPage>
   )
 }
 
 function CenteredNote({ children }: { children: ReactNode }) {
   return (
-    <div className="mt-6 rounded-app-lg border border-app-border bg-app-surface p-10 text-center text-sm text-app-text-muted">
+    <div className="border border-app-border bg-app-surface p-10 text-center font-mono text-[11px] uppercase tracking-[0.16em] text-app-text-muted">
       {children}
     </div>
   )

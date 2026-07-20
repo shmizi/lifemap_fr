@@ -17,27 +17,19 @@ interface GoalHealthBadgeProps {
   status: HealthStatus
 }
 
-const STYLES: Record<HealthStatus, { label: string; className: string }> = {
-  on_track: {
-    label: 'On track',
-    className: 'border-emerald-500/30 text-emerald-600 bg-emerald-500/10',
-  },
-  at_risk: {
-    label: 'At risk',
-    className: 'border-amber-500/30 text-amber-600 bg-amber-500/10',
-  },
-  behind: {
-    label: 'Behind',
-    className: 'border-red-500/30 text-red-600 bg-red-500/10',
-  },
+// Editorial: a small status dot + a letterspaced mono label, no filled pill. The
+// dot carries the (functional) color; the text stays ink so the register reads calm.
+const STYLES: Record<HealthStatus, { label: string; dot: string }> = {
+  on_track: { label: 'On track', dot: 'bg-emerald-600' },
+  at_risk: { label: 'At risk', dot: 'bg-amber-600' },
+  behind: { label: 'Behind', dot: 'bg-red-600' },
 }
 
 export function GoalHealthBadge({ status }: GoalHealthBadgeProps) {
-  const { label, className } = STYLES[status]
+  const { label, dot } = STYLES[status]
   return (
-    <span
-      className={`shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-medium ${className}`}
-    >
+    <span className="inline-flex shrink-0 items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-app-text-muted">
+      <span className={`h-1.5 w-1.5 rounded-full ${dot}`} aria-hidden />
       {label}
     </span>
   )
