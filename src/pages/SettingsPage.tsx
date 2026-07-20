@@ -12,6 +12,7 @@ import { ProfileSection } from '@/features/settings/ProfileSection'
 import { UserContextSection } from '@/features/settings/UserContextSection'
 import { AppearanceSection } from '@/features/settings/AppearanceSection'
 import { RemindersSection } from '@/features/settings/RemindersSection'
+import { AccountSection } from '@/features/settings/AccountSection'
 import { RegistryPage } from '@/components/ui/Registry'
 
 export function SettingsPage() {
@@ -51,6 +52,8 @@ export function SettingsPage() {
           // the loaded context via useState initializers, then owns its own state.
           <UserContextSection context={userContext} />
         )}
+
+        <AccountSection />
 
         <AppearanceSection />
 

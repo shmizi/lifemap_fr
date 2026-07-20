@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
+    "@supabase/supabase-js": "^2.110.7",
     "date-fns": "^4.4.0",
     "dexie": "^4.4.3",
     "framer-motion": "^12.40.0",

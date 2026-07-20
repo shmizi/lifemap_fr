@@ -18,7 +18,7 @@ import { useGoalStore } from '@/store/useGoalStore'
 import { useLifeMap } from '@/core/hooks/useLifeMap'
 import { useProfile } from '@/core/hooks/useProfile'
 import { ROUTES } from '@/core/constants'
-import { registryColophon } from '@/core/utils/colophon'
+import { useColophon } from '@/core/hooks/useColophon'
 import { dailyQuote } from '@/core/utils/dailyQuote'
 import { RegistrySection, LeaderRow } from '@/components/ui/Registry'
 import { FocusLedger } from '@/features/dashboard/registry/FocusLedger'
@@ -34,6 +34,7 @@ export function DashboardPage() {
   const navigate = useNavigate()
   const { lifeMap, isLoading } = useLifeMap()
   const { profile } = useProfile()
+  const colophon = useColophon(profile?.createdAt)
 
   const todaysTasks = useGoalStore((s) => s.todaysTasks)
   const topPriorityTasks = useGoalStore((s) => s.topPriorityTasks)
@@ -190,7 +191,7 @@ export function DashboardPage() {
       {/* ── Colophon foot ────────────────────────────────────────────────── */}
       <footer className="mt-10 flex items-center justify-between border-t border-app-border pt-3 font-mono text-[10px] uppercase tracking-[0.18em] text-app-text-muted">
         <span>Last revision {format(now, 'yyyy.MM.dd')}</span>
-        <span>LifeMap · {registryColophon(profile?.createdAt)}</span>
+        <span>LifeMap · {colophon}</span>
       </footer>
     </div>
   )

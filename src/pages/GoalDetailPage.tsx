@@ -67,6 +67,12 @@ export function GoalDetailPage() {
   const [isRescheduling, setIsRescheduling] = useState(false)
   const [rescheduleNote, setRescheduleNote] = useState<string | null>(null)
 
+  // Manual de-dup: sweep near-identical task titles across this goal's subgoals and
+  // drop the later copies (the same pass generateFullRoadmap runs automatically).
+  const dedupeGoalTasks = useGoalStore((s) => s.dedupeGoalTasks)
+  const [isDeduping, setIsDeduping] = useState(false)
+  const [dedupeNote, setDedupeNote] = useState<string | null>(null)
+
   // Auto top-up: on opening a goal, extend any consistency subgoal whose rolling
   // task window is running low. Best-effort and once per goal — it only fires AI
   // for subgoals that are actually low (a freshly generated plan is not), so most
@@ -139,6 +145,24 @@ export function GoalDetailPage() {
       setRescheduleNote('Could not reschedule just now. Please try again.')
     } finally {
       setIsRescheduling(false)
+    }
+  }
+
+  async function handleDedupe() {
+    if (isDeduping) return
+    setIsDeduping(true)
+    setDedupeNote(null)
+    try {
+      const removed = await dedupeGoalTasks(goal.id)
+      setDedupeNote(
+        removed > 0
+          ? `Removed ${removed} duplicate task${removed === 1 ? '' : 's'}.`
+          : 'No duplicate tasks found.',
+      )
+    } catch {
+      setDedupeNote('Could not check for duplicates just now. Please try again.')
+    } finally {
+      setIsDeduping(false)
     }
   }
 
@@ -312,8 +336,24 @@ export function GoalDetailPage() {
               <Plus size={15} />
               Add subgoal
             </button>
+            {subgoals.length > 0 ? (
+              <button
+                type="button"
+                onClick={handleDedupe}
+                disabled={isDeduping}
+                title="Remove near-identical duplicate tasks across subgoals"
+                className="inline-flex items-center gap-1.5 border border-app-border px-3 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-app-text transition hover:bg-app-surface-alt disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+              >
+                {isDeduping ? 'Checking…' : 'Remove duplicates'}
+              </button>
+            ) : null}
           </div>
         </div>
+        {dedupeNote ? (
+          <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.12em] text-app-text-muted">
+            {dedupeNote}
+          </p>
+        ) : null}
 
         {subgoals.length === 0 ? (
           <div className="mt-3 rounded-app-lg border border-dashed border-app-border bg-app-surface p-8 text-center">

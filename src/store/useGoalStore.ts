@@ -48,6 +48,7 @@ import {
 import { isMilestoneComplete } from '@/engine/progress/isMilestoneComplete'
 import { rankTasks, DEFAULT_TOP_N } from '@/engine/priority/rankTasks'
 import { partitionScheduledAndBacklog } from '@/engine/planning/partitionTasks'
+import { findDuplicateTaskIds } from '@/engine/planning/dedupeTasks'
 import { computeActiveSupportCounts } from '@/engine/priority/dependencyBoost'
 import { buildRoadmap } from '@/engine/roadmap/buildRoadmap'
 import { computeLifeMapLayout } from '@/engine/roadmap/computeLifeMapLayout'
@@ -474,6 +475,10 @@ interface GoalState {
   editTask: (id: ID, changes: TaskChanges) => Promise<void>
   removeTask: (id: ID) => Promise<void>
   toggleTaskComplete: (task: Task) => Promise<void>
+  // Sweep near-identical task titles across the whole goal and delete the later
+  // copies (provider-independent; see engine/planning/dedupeTasks). Runs at the end
+  // of generateFullRoadmap and on demand from Goal Detail. Returns how many were removed.
+  dedupeGoalTasks: (goalId: ID) => Promise<number>
 
   // --- weekly review (its own /reviews route; loaded by that page, NOT bundled
   // into the dashboard load) ---
@@ -1274,6 +1279,45 @@ export const useGoalStore = create<GoalState>()((set, get) => {
         refreshDashboard(),
         refreshCrossGoal(),
       ])
+    },
+
+    // De-duplicate a goal's tasks: gather every task in a stable KEEP-PRIORITY order
+    // (subgoals in display order; within each, milestone-phase tasks then loose
+    // tasks), let the pure engine flag later near-identical titles, delete those,
+    // reconcile any affected milestone, and refresh ONCE. Keeps the first/canonical
+    // copy of each cluster. Returns how many were removed (0 = nothing matched).
+    dedupeGoalTasks: async (goalId) => {
+      const tree = await getGoalTree(goalId)
+      if (!tree) return 0
+
+      const ordered: { id: ID; title: string; milestoneId?: ID }[] = []
+      for (const st of tree.subgoals) {
+        for (const mt of st.milestones) {
+          for (const task of mt.tasks) {
+            ordered.push({ id: task.id, title: task.title, milestoneId: task.milestoneId })
+          }
+        }
+        for (const task of st.looseTasks) {
+          ordered.push({ id: task.id, title: task.title, milestoneId: task.milestoneId })
+        }
+      }
+
+      const removeIds = new Set(findDuplicateTaskIds(ordered))
+      if (removeIds.size === 0) return 0
+
+      const affectedMilestones = new Set<ID>()
+      for (const t of ordered) {
+        if (!removeIds.has(t.id)) continue
+        await deleteTask(t.id)
+        if (t.milestoneId) affectedMilestones.add(t.milestoneId)
+      }
+      for (const mId of affectedMilestones) await reconcileMilestone(mId)
+      await settleRefreshes([
+        refreshCurrentTree(),
+        refreshDashboard(),
+        refreshCrossGoal(),
+      ])
+      return removeIds.size
     },
 
     // Flip a task between completed and pending. Completing stamps completedAt
@@ -2189,6 +2233,12 @@ export const useGoalStore = create<GoalState>()((set, get) => {
           }
         }
       }
+
+      // Belt-and-suspenders on the prompt-level de-dup: sweep near-identical task
+      // titles across the whole goal and drop later copies. Provider-independent, so
+      // it also cleans plans generated before the prompt fix. Runs on EVERY
+      // generation (outside the pending guard) — including gap-fills and re-runs.
+      await get().dedupeGoalTasks(goalId)
     },
 
     topUpRoadmap: async (goalId) => {

@@ -10,7 +10,7 @@ import { NavLink } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { useUIStore } from '@/store/useUIStore'
 import { useProfile } from '@/core/hooks/useProfile'
-import { registryColophon } from '@/core/utils/colophon'
+import { useColophon } from '@/core/hooks/useColophon'
 import { APP_NAME, ROUTES } from '@/core/constants'
 import { LAYOUT } from '@/core/constants/layout'
 
@@ -34,6 +34,7 @@ export function Sidebar() {
   const sidebarOpen = useUIStore((state) => state.sidebarOpen)
   const toggleSidebar = useUIStore((state) => state.toggleSidebar)
   const { profile } = useProfile()
+  const colophon = useColophon(profile?.createdAt)
 
   const width = sidebarOpen
     ? LAYOUT.SIDEBAR_WIDTH_OPEN
@@ -122,7 +123,7 @@ export function Sidebar() {
           year the user joined; Edition = their signup ordinal (see registryColophon). */}
       {sidebarOpen && (
         <div className="border-t border-app-border px-4 py-3 font-mono text-[10px] uppercase tracking-[0.16em] text-app-text-muted">
-          {registryColophon(profile?.createdAt)}
+          {colophon}
         </div>
       )}
     </aside>
