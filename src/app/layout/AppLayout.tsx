@@ -49,9 +49,12 @@ export function AppLayout() {
       <OnboardingGate />
       <Sidebar />
 
-      {/* Everything to the right of the sidebar shifts by the sidebar width. */}
+      {/* Everything to the right of the sidebar shifts by the sidebar width. The
+          column is pinned to the viewport height (h-screen) so the content region
+          below owns scrolling — this lets a page opt to be a single fixed screen
+          (the Dashboard) while taller pages scroll within the content area. */}
       <div
-        className="relative z-10 flex min-h-screen flex-col transition-[margin] duration-300 ease-in-out"
+        className="relative z-10 flex h-screen flex-col transition-[margin] duration-300 ease-in-out"
         style={{ marginLeft: sidebarWidth }}
       >
         {/* Topbar is sticky so it stays visible while the content scrolls; the
@@ -62,7 +65,7 @@ export function AppLayout() {
         </div>
 
         <main
-          className="flex-1"
+          className="flex min-h-0 flex-1 flex-col overflow-y-auto"
           style={{ padding: LAYOUT.CONTENT_PADDING }}
         >
           {/* One Suspense boundary for the lazily-loaded route pages: the shell

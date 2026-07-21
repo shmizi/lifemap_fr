@@ -11,6 +11,7 @@ import { motion } from 'framer-motion'
 import { useUIStore } from '@/store/useUIStore'
 import { useProfile } from '@/core/hooks/useProfile'
 import { useColophon } from '@/core/hooks/useColophon'
+import { dailyQuote } from '@/core/utils/dailyQuote'
 import { APP_NAME, ROUTES } from '@/core/constants'
 import { LAYOUT } from '@/core/constants/layout'
 
@@ -35,6 +36,9 @@ export function Sidebar() {
   const toggleSidebar = useUIStore((state) => state.toggleSidebar)
   const { profile } = useProfile()
   const colophon = useColophon(profile?.createdAt)
+  // The daily epigraph now lives here (moved off the Dashboard's right rail so that
+  // rail fits on one screen). Deterministic per day; see dailyQuote.
+  const [quoteText, quoteAuthor] = dailyQuote(new Date())
 
   const width = sidebarOpen
     ? LAYOUT.SIDEBAR_WIDTH_OPEN
@@ -121,6 +125,19 @@ export function Sidebar() {
 
       {/* Colophon foot — reinforces the "printed volume" identity. Volume = the
           year the user joined; Edition = their signup ordinal (see registryColophon). */}
+      {sidebarOpen && (
+        <div className="border-t border-app-border px-4 py-3">
+          <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-app-text-muted">
+            Field Note
+          </p>
+          <blockquote className="mt-1.5 font-display text-[12px] italic leading-snug text-app-text">
+            “{quoteText}”
+          </blockquote>
+          <p className="mt-1.5 font-mono text-[9px] uppercase tracking-[0.14em] text-app-text-muted">
+            — {quoteAuthor}
+          </p>
+        </div>
+      )}
       {sidebarOpen && (
         <div className="border-t border-app-border px-4 py-3 font-mono text-[10px] uppercase tracking-[0.16em] text-app-text-muted">
           {colophon}

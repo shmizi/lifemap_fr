@@ -14,6 +14,7 @@ import type {
   TimeOfDay,
   WorkRhythm,
   DeadlineHardness,
+  SlipReason,
 } from '@/core/types';
 
 export const APP_NAME = 'LifeMap' as const;
@@ -254,6 +255,20 @@ export const DEADLINE_HARDNESS_OPTIONS: ReadonlyArray<{
 }> = [
   { value: 'soft', label: 'Flexible target — the date can move' },
   { value: 'hard', label: 'Hard deadline — missing it means missing the goal' },
+];
+
+// The pickable reasons a task slipped (Stage 3). Excludes 'unspecified' — that is
+// the stored value when the user skips, not something they choose. Order is the
+// prompt order. Labels are first-person and blame-free (a slip is normal).
+export const SLIP_REASON_OPTIONS: ReadonlyArray<{
+  value: Exclude<SlipReason, 'unspecified'>;
+  label: string;
+}> = [
+  { value: 'higher_priority', label: 'Higher-priority work came up' },
+  { value: 'no_time', label: 'Ran out of time' },
+  { value: 'not_motivated', label: 'Didn’t feel like it' },
+  { value: 'dependency', label: 'Waiting on something else' },
+  { value: 'external', label: 'Blocked by something outside my control' },
 ];
 
 // Short weekday labels, index 0 = Sunday .. 6 = Saturday (matches Date.getDay()

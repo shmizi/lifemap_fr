@@ -23,6 +23,9 @@
 import { nanoid } from 'nanoid';
 import { db } from '@/database/db';
 import type { ID, Dependency } from '@/core/types';
+import { isCloudDataLive, cloudClient } from '@/database/backend';
+import { dependencyToRow } from '@/database/migration/toRows';
+import { dependencyFromRow } from '@/database/migration/fromRows';
 
 /**
  * Fields the CALLER must provide. id and createdAt are generated here, so they
@@ -41,6 +44,13 @@ export async function createDependency(
     id: nanoid(),
     createdAt: new Date().toISOString(),
   };
+  if (isCloudDataLive()) {
+    const { error } = await cloudClient()
+      .from('dependencies')
+      .insert(dependencyToRow(dependency));
+    if (error) throw new Error(`createDependency: ${error.message}`);
+    return dependency;
+  }
   await db.dependencies.add(dependency);
   return dependency;
 }
@@ -58,6 +68,14 @@ export async function createDependency(
 export async function getDependenciesBlocking(
   entityId: ID
 ): Promise<Dependency[]> {
+  if (isCloudDataLive()) {
+    const { data, error } = await cloudClient()
+      .from('dependencies')
+      .select('*')
+      .eq('to_id', entityId);
+    if (error) throw new Error(`getDependenciesBlocking: ${error.message}`);
+    return (data ?? []).map(dependencyFromRow);
+  }
   return db.dependencies.where('toId').equals(entityId).toArray();
 }
 
@@ -69,6 +87,14 @@ export async function getDependenciesBlocking(
 export async function getDependenciesDownstreamOf(
   entityId: ID
 ): Promise<Dependency[]> {
+  if (isCloudDataLive()) {
+    const { data, error } = await cloudClient()
+      .from('dependencies')
+      .select('*')
+      .eq('from_id', entityId);
+    if (error) throw new Error(`getDependenciesDownstreamOf: ${error.message}`);
+    return (data ?? []).map(dependencyFromRow);
+  }
   return db.dependencies.where('fromId').equals(entityId).toArray();
 }
 
@@ -85,6 +111,14 @@ export async function getDependenciesDownstreamOf(
 export async function getDependenciesByType(
   type: Dependency['type']
 ): Promise<Dependency[]> {
+  if (isCloudDataLive()) {
+    const { data, error } = await cloudClient()
+      .from('dependencies')
+      .select('*')
+      .eq('type', type);
+    if (error) throw new Error(`getDependenciesByType: ${error.message}`);
+    return (data ?? []).map(dependencyFromRow);
+  }
   return db.dependencies.where('type').equals(type).toArray();
 }
 
@@ -93,6 +127,14 @@ export async function deleteDependency(id: ID): Promise<void> {
   // matches the id, so this is naturally idempotent on an unknown id — no need
   // to pre-check existence. (Unlike update(), which returns a 0 count we throw
   // on; delete() has no such contract, so the convention stays consistent.)
+  if (isCloudDataLive()) {
+    const { error } = await cloudClient()
+      .from('dependencies')
+      .delete()
+      .eq('id', id);
+    if (error) throw new Error(`deleteDependency: ${error.message}`);
+    return;
+  }
   await db.dependencies.delete(id);
 }
 
@@ -115,6 +157,24 @@ export async function deleteDependenciesReferencing(
   entityIds: ID[]
 ): Promise<void> {
   if (entityIds.length === 0) return;
+  if (isCloudDataLive()) {
+    // Two deletes rather than one `.or()` for the same reason as the Dexie branch:
+    // simple and obviously correct. supabase-js has no transaction, so these run in
+    // sequence (the caller's entity delete having already happened); a stray edge is
+    // harmless if one step fails and re-runs.
+    const client = cloudClient();
+    const { error: fromErr } = await client
+      .from('dependencies')
+      .delete()
+      .in('from_id', entityIds);
+    if (fromErr) throw new Error(`deleteDependenciesReferencing: ${fromErr.message}`);
+    const { error: toErr } = await client
+      .from('dependencies')
+      .delete()
+      .in('to_id', entityIds);
+    if (toErr) throw new Error(`deleteDependenciesReferencing: ${toErr.message}`);
+    return;
+  }
   await db.dependencies.where('fromId').anyOf(entityIds).delete();
   await db.dependencies.where('toId').anyOf(entityIds).delete();
 }

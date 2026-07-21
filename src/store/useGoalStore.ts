@@ -24,6 +24,7 @@ import type {
   Dependency,
   DeadlineHardness,
   StrategyBrief,
+  SlipReason,
   ID,
 } from '@/core/types'
 import { computeEffortMomentum } from '@/engine/progress/computeEffortMomentum'
@@ -45,6 +46,19 @@ import {
   computeGoalProjection,
   type GoalProjection,
 } from '@/engine/health/computeGoalProjection'
+import {
+  computeReliability,
+  type Reliability,
+} from '@/engine/health/computeReliability'
+import { computeRisk, type Risk } from '@/engine/health/computeRisk'
+import {
+  computeGoalInsights,
+  type GoalInsight,
+} from '@/engine/health/computeGoalInsights'
+import {
+  computeSlipInsights,
+  type SlipPattern,
+} from '@/engine/health/computeSlipInsights'
 import { isMilestoneComplete } from '@/engine/progress/isMilestoneComplete'
 import { rankTasks, DEFAULT_TOP_N } from '@/engine/priority/rankTasks'
 import { partitionScheduledAndBacklog } from '@/engine/planning/partitionTasks'
@@ -159,6 +173,9 @@ import {
   saveStrategyBrief,
   getStrategyBrief,
   getProfile,
+  createSlipEvents,
+  getSlipEventsByGoalId,
+  deleteSlipEventsByGoalId,
 } from '@/database/repositories'
 
 // User-facing copy for the store's NON-FATAL failure states. Kept calm and
@@ -233,6 +250,19 @@ export type GoalHealthView = GoalHealth & {
   // never as "move the date".
   projection: GoalProjection
   deadlineHardness: DeadlineHardness | null
+  // The SEPARATE reliability signal (engine/health/computeReliability) — "how
+  // trustworthy have my plans been over time?" Never blended into the pace score/
+  // status: a slip (reschedule / late finish / open miss) dents this durably, and it
+  // recovers with recent consistency, whereas pace fully heals the moment completion
+  // catches up. The card shows both, each on its own line.
+  reliability: Reliability
+  // The blended top-line (engine/health/computeRisk) — Low/Med/High "chance of
+  // missing this goal", folding pace + reliability + projection. Unlike the signals
+  // above it is deliberately combined, but stays explainable by its inputs.
+  risk: Risk
+  // Plain-language interpretation of the signals (engine/health/computeGoalInsights),
+  // ranked; the card shows the top line. Empty when there's nothing to say.
+  insights: GoalInsight[]
 }
 
 // Outcome of applyScopeCut (Phase 10) — how many approved suggestions took effect,
@@ -460,6 +490,11 @@ interface GoalState {
   // so the plan itself must shrink. Null until a goal is open.
   currentGoalProjection: GoalProjection | null
   currentGoalDeadlineHardness: DeadlineHardness | null
+  // Stage 3 — the open goal's dominant slip PATTERN (why its tasks keep slipping),
+  // computed from its reschedule reason log over a recent window. null when there's
+  // no clear pattern (too few reasoned slips, or none dominates). Loaded with the
+  // tree and refreshed after a reschedule records new reasons.
+  currentGoalSlipInsight: SlipPattern | null
   isLoadingTree: boolean
   loadGoalTree: (id: ID) => Promise<void>
 
@@ -632,7 +667,7 @@ interface GoalState {
   // window at the target (overflow compresses onto the last day, never slips past);
   // a soft deadline spreads freely. Returns how many tasks were moved (0 = none
   // overdue). Refreshes the tree/dashboard/cross-goal caches like a task mutation.
-  rescheduleOverdueForGoal: (goalId: ID) => Promise<number>
+  rescheduleOverdueForGoal: (goalId: ID, reason: SlipReason) => Promise<number>
 
   // Cross-goal reschedule-on-miss (Phase 10) — the DASHBOARD counterpart to
   // rescheduleOverdueForGoal. Pull EVERY goal's overdue (missed, incomplete,
@@ -643,7 +678,7 @@ interface GoalState {
   // first; a HARD deadline that must not slip stays the job of that goal's own
   // reschedule (rescheduleOverdueForGoal, which compresses onto the date). Returns how
   // many tasks moved (0 = none overdue). Refreshes the task-date caches.
-  rescheduleAllOverdue: () => Promise<number>
+  rescheduleAllOverdue: (reason: SlipReason) => Promise<number>
 
   // Hard-deadline scope-cut escalation (Phase 10) — the counterpart to
   // rescheduleOverdueForGoal. A SOFT miss reschedules mechanically (above); a HARD
@@ -739,6 +774,13 @@ export const useGoalStore = create<GoalState>()((set, get) => {
   ): Promise<RoadmapDigest | undefined> => {
     const tree = await getGoalTree(goalId)
     return tree ? computeRoadmapDigest(tree, new Date()) : undefined
+  }
+
+  // The goal's dominant slip pattern from its reschedule reason log (Stage 3). Time
+  // is read here (store side); the engine stays pure. null when no clear pattern.
+  const slipInsightFor = async (goalId: ID): Promise<SlipPattern | null> => {
+    const events = await getSlipEventsByGoalId(goalId)
+    return computeSlipInsights(events, new Date())
   }
 
   const refreshCurrentTree = async () => {
@@ -899,11 +941,32 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       )
       const deadlineHardness = goalContexts[i]?.deadlineHardness ?? null
 
+      // Reliability reads the same tasks already in hand (no extra query): their
+      // durable slip history (rescheduleCount) + completed-late vs on-time.
+      const reliability = computeReliability(g.tasks, now)
+
+      // Risk blends the signals into one Low/Med/High; insights narrate them.
+      const risk = computeRisk({
+        paceStatus: pace.status,
+        reliabilityStatus: reliability.status,
+        daysBehind: projection.daysBehind,
+        deadlineHardness,
+      })
+      const insights = computeGoalInsights({
+        progressPercent: progress.percent,
+        paceStatus: pace.status,
+        reliability,
+        riskLevel: risk.level,
+      })
+
       const health: GoalHealthView = {
         ...pace,
         laggingFoundation,
         projection,
         deadlineHardness,
+        reliability,
+        risk,
+        insights,
       }
       return { goal: g.goal, progress, health }
     })
@@ -1074,6 +1137,8 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       // goalRepository cascade can't reach it — remove it here so a goalContext
       // row never outlives the goal it describes. Idempotent (no row = no-op).
       await deleteGoalContext(id)
+      // Stage 3: same for the goal's slip-event log (its own table, not cascaded).
+      await deleteSlipEventsByGoalId(id)
       await settleRefreshes([refreshGoalsAndProgress()])
     },
 
@@ -1117,6 +1182,7 @@ export const useGoalStore = create<GoalState>()((set, get) => {
     currentGoalProgress: { completed: 0, total: 0, percent: 0 },
     currentGoalProjection: null,
     currentGoalDeadlineHardness: null,
+    currentGoalSlipInsight: null,
     isLoadingTree: false,
 
     // Blanks the tree first (avoids a stale-goal flash when navigating between
@@ -1130,14 +1196,17 @@ export const useGoalStore = create<GoalState>()((set, get) => {
         currentGoalProgress: { completed: 0, total: 0, percent: 0 },
         currentGoalProjection: null,
         currentGoalDeadlineHardness: null,
+        currentGoalSlipInsight: null,
       })
       try {
         // The goal context (for deadline hardness) is read alongside the tree so the
         // scope-cut nudge can decide, without AI, whether the goal is behind on a
-        // HARD deadline the moment the page lands.
-        const [treeRaw, goalContext] = await Promise.all([
+        // HARD deadline the moment the page lands. The slip pattern (Stage 3) rides
+        // along too so the Detail View can show WHY work keeps slipping on arrival.
+        const [treeRaw, goalContext, slipInsight] = await Promise.all([
           getGoalTree(id),
           getGoalContext(id),
+          slipInsightFor(id),
         ])
         const tree = treeRaw ?? null
         const progress = goalProgressFromTree(tree)
@@ -1155,6 +1224,7 @@ export const useGoalStore = create<GoalState>()((set, get) => {
               )
             : null,
           currentGoalDeadlineHardness: goalContext?.deadlineHardness ?? null,
+          currentGoalSlipInsight: slipInsight,
           error: null,
         })
       } catch {
@@ -2310,7 +2380,7 @@ export const useGoalStore = create<GoalState>()((set, get) => {
     // profile (daily capacity) and the user context (days off); the pure
     // rescheduleOverdue decides the new dates. `new Date()` is read here (store
     // side), never in the engine.
-    rescheduleOverdueForGoal: async (goalId) => {
+    rescheduleOverdueForGoal: async (goalId, reason) => {
       const tree = await getGoalTree(goalId)
       if (!tree) return 0
 
@@ -2356,15 +2426,28 @@ export const useGoalStore = create<GoalState>()((set, get) => {
         },
       )
 
-      // Persist the new dates, then refresh every surface a task date touches.
+      // Persist the new dates AND bump the durable slip counter (so Reliability
+      // remembers this miss even after the task is later completed), then refresh
+      // every surface a task date touches.
+      const priorCount = new Map(overdue.map((t) => [t.id, t.rescheduleCount ?? 0]))
       for (const r of rescheduled) {
-        await updateTask(r.id, { scheduledDate: r.scheduledDate })
+        await updateTask(r.id, {
+          scheduledDate: r.scheduledDate,
+          rescheduleCount: (priorCount.get(r.id) ?? 0) + 1,
+        })
       }
+      // Log one slip event per moved task with the batch reason (Stage 3), then
+      // refresh the goal's slip pattern so the Detail View updates in place.
+      await createSlipEvents(
+        rescheduled.map((r) => ({ taskId: r.id, goalId, reason })),
+      )
+      const slipInsight = await slipInsightFor(goalId)
       await settleRefreshes([
         refreshCurrentTree(),
         refreshDashboard(),
         refreshCrossGoal(),
       ])
+      set({ currentGoalSlipInsight: slipInsight })
       return rescheduled.length
     },
 
@@ -2372,7 +2455,7 @@ export const useGoalStore = create<GoalState>()((set, get) => {
     // per-goal version, but the overdue set spans EVERY goal and shares one daily
     // budget — a getTasksScheduledBefore(today) read already returns them all, so no
     // per-goal tree walk is needed. Unbounded (maxDate: null): capacity-first spread.
-    rescheduleAllOverdue: async () => {
+    rescheduleAllOverdue: async (reason) => {
       const now = new Date()
       const today = format(now, 'yyyy-MM-dd')
       const overdueRaw = await getTasksScheduledBefore(today)
@@ -2402,14 +2485,44 @@ export const useGoalStore = create<GoalState>()((set, get) => {
         },
       )
 
+      const priorCount = new Map(overdue.map((t) => [t.id, t.rescheduleCount ?? 0]))
       for (const r of rescheduled) {
-        await updateTask(r.id, { scheduledDate: r.scheduledDate })
+        await updateTask(r.id, {
+          scheduledDate: r.scheduledDate,
+          rescheduleCount: (priorCount.get(r.id) ?? 0) + 1,
+        })
       }
+
+      // Resolve each moved task's goal (via its subgoal) so its slip event lands on
+      // the right goal — this cross-goal action has no goalId in hand, unlike the
+      // per-goal reschedule. Unique-subgoal fan-out; tiny at this scale.
+      const subgoalIds = [...new Set(overdue.map((t) => t.subgoalId))]
+      const subgoalGoal = new Map<ID, ID>()
+      await Promise.all(
+        subgoalIds.map(async (sid) => {
+          const sg = await getSubgoalById(sid)
+          if (sg) subgoalGoal.set(sid, sg.goalId)
+        }),
+      )
+      const taskSubgoal = new Map(overdue.map((t) => [t.id, t.subgoalId]))
+      const events = rescheduled
+        .map((r) => {
+          const goalId = subgoalGoal.get(taskSubgoal.get(r.id) ?? '')
+          return goalId ? { taskId: r.id, goalId, reason } : null
+        })
+        .filter((e): e is { taskId: ID; goalId: ID; reason: SlipReason } => e !== null)
+      await createSlipEvents(events)
+
       await settleRefreshes([
         refreshCurrentTree(),
         refreshDashboard(),
         refreshCrossGoal(),
       ])
+      // If a goal is open, its pattern may have changed — refresh it in place.
+      const openGoalId = get().currentGoalTree?.goal.id
+      if (openGoalId) {
+        set({ currentGoalSlipInsight: await slipInsightFor(openGoalId) })
+      }
       return rescheduled.length
     },
 

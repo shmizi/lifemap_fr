@@ -12,9 +12,28 @@
 
 import { db } from '../db';
 import type { UserContext, GoalContext, StrategyBrief, ID } from '@/core/types';
+import { isCloudDataLive, cloudClient } from '@/database/backend';
+import { userContextToRow, goalContextToRow } from '@/database/migration/toRows';
+import { userContextFromRow, goalContextFromRow } from '@/database/migration/fromRows';
 
 // The fixed primary key of the single userContext row (mirrors PROFILE_ID).
 export const USER_CONTEXT_ID = 'me';
+
+// Persist a fully-built goalContext row to whichever backend is live. Shared by the
+// three writers below (saveGoalContext / saveStrategyBrief / saveGoalLearnings), which
+// all read-modify-write the SAME row and differ only in which fields they compute.
+// Cloud upserts on goal_id (the PK); user_id defaults to auth.uid() server-side.
+async function putGoalContext(context: GoalContext): Promise<GoalContext> {
+  if (isCloudDataLive()) {
+    const { error } = await cloudClient()
+      .from('goal_context')
+      .upsert(goalContextToRow(context), { onConflict: 'goal_id' });
+    if (error) throw new Error(`putGoalContext: ${error.message}`);
+    return context;
+  }
+  await db.goalContext.put(context);
+  return context;
+}
 
 // Fields the CALLER provides. id/createdAt/updatedAt are owned by the repository.
 export type SaveUserContextInput = Omit<
@@ -30,6 +49,15 @@ export type SaveGoalContextInput = Omit<GoalContext, 'createdAt' | 'updatedAt'>;
  * been saved — the onboarding gate treats that as "first run".
  */
 export async function getUserContext(): Promise<UserContext | undefined> {
+  if (isCloudDataLive()) {
+    // ONE row per user; RLS scopes the read, so no id filter is needed.
+    const { data, error } = await cloudClient()
+      .from('user_context')
+      .select('*')
+      .maybeSingle();
+    if (error) throw new Error(`getUserContext: ${error.message}`);
+    return data ? userContextFromRow(data) : undefined;
+  }
   return db.userContext.get(USER_CONTEXT_ID);
 }
 
@@ -41,13 +69,21 @@ export async function saveUserContext(
   input: SaveUserContextInput,
 ): Promise<UserContext> {
   const now = new Date().toISOString();
-  const existing = await db.userContext.get(USER_CONTEXT_ID);
+  const existing = await getUserContext();
   const context: UserContext = {
     ...input,
     id: USER_CONTEXT_ID,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
+  if (isCloudDataLive()) {
+    // Upsert on user_id (the PK); user_id defaults to auth.uid() server-side.
+    const { error } = await cloudClient()
+      .from('user_context')
+      .upsert(userContextToRow(context), { onConflict: 'user_id' });
+    if (error) throw new Error(`saveUserContext: ${error.message}`);
+    return context;
+  }
   await db.userContext.put(context);
   return context;
 }
@@ -58,6 +94,15 @@ export async function saveUserContext(
 export async function getGoalContext(
   goalId: ID,
 ): Promise<GoalContext | undefined> {
+  if (isCloudDataLive()) {
+    const { data, error } = await cloudClient()
+      .from('goal_context')
+      .select('*')
+      .eq('goal_id', goalId)
+      .maybeSingle();
+    if (error) throw new Error(`getGoalContext: ${error.message}`);
+    return data ? goalContextFromRow(data) : undefined;
+  }
   return db.goalContext.get(goalId);
 }
 
@@ -69,7 +114,7 @@ export async function saveGoalContext(
   input: SaveGoalContextInput,
 ): Promise<GoalContext> {
   const now = new Date().toISOString();
-  const existing = await db.goalContext.get(input.goalId);
+  const existing = await getGoalContext(input.goalId);
   const context: GoalContext = {
     ...input,
     // The strategy brief is written via saveStrategyBrief, NOT the intake form, so
@@ -79,8 +124,7 @@ export async function saveGoalContext(
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
-  await db.goalContext.put(context);
-  return context;
+  return putGoalContext(context);
 }
 
 /**
@@ -91,7 +135,7 @@ export async function saveGoalContext(
 export async function getStrategyBrief(
   goalId: ID,
 ): Promise<StrategyBrief | undefined> {
-  const existing = await db.goalContext.get(goalId);
+  const existing = await getGoalContext(goalId);
   return existing?.strategyBrief;
 }
 
@@ -107,7 +151,7 @@ export async function saveStrategyBrief(
   brief: StrategyBrief,
 ): Promise<GoalContext> {
   const now = new Date().toISOString();
-  const existing = await db.goalContext.get(goalId);
+  const existing = await getGoalContext(goalId);
   const context: GoalContext = {
     goalId,
     deadlineHardness: 'soft',
@@ -116,8 +160,7 @@ export async function saveStrategyBrief(
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
-  await db.goalContext.put(context);
-  return context;
+  return putGoalContext(context);
 }
 
 /**
@@ -131,7 +174,7 @@ export async function saveGoalLearnings(
   learnings: string,
 ): Promise<GoalContext> {
   const now = new Date().toISOString();
-  const existing = await db.goalContext.get(goalId);
+  const existing = await getGoalContext(goalId);
   const context: GoalContext = {
     goalId,
     deadlineHardness: 'soft',
@@ -140,8 +183,7 @@ export async function saveGoalLearnings(
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
-  await db.goalContext.put(context);
-  return context;
+  return putGoalContext(context);
 }
 
 /**
@@ -150,5 +192,13 @@ export async function saveGoalLearnings(
  * (deleting a missing key is a no-op in Dexie).
  */
 export async function deleteGoalContext(goalId: ID): Promise<void> {
+  if (isCloudDataLive()) {
+    const { error } = await cloudClient()
+      .from('goal_context')
+      .delete()
+      .eq('goal_id', goalId);
+    if (error) throw new Error(`deleteGoalContext: ${error.message}`);
+    return;
+  }
   await db.goalContext.delete(goalId);
 }

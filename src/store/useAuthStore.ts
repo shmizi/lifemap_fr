@@ -14,6 +14,7 @@
 import { create } from 'zustand'
 import { supabase, isSupabaseConfigured } from '@/services/supabase/client'
 import { importLocalDataToSupabase } from '@/database/migration/importToSupabase'
+import { notifyBackendChanged } from '@/database/backend'
 
 // The durable per-user profile row (see supabase/migrations — profiles). Only the
 // two fields the UI needs today; email is kept for the account panel.
@@ -94,7 +95,14 @@ export const useAuthStore = create<AuthState>()((set, get) => {
         importTriggered = true
         void importLocalDataToSupabase().then((r) => {
           // Retry on a later sign-in if the seed errored (guard stays down).
-          if (r.status === 'error') importTriggered = false
+          if (r.status === 'error') {
+            importTriggered = false
+          } else {
+            // Seed finished (or was already done): the account now holds the data, so
+            // refresh the UI to read it from Supabase. The auth listener's earlier
+            // refresh may have raced ahead of the seed; this one lands after it.
+            notifyBackendChanged()
+          }
         })
       }
     } else {

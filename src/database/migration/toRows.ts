@@ -24,6 +24,7 @@ import type {
   GoalContext,
   ProgressSnapshot,
   Opportunity,
+  SlipEvent,
 } from '@/core/types'
 
 export function goalToRow(g: Goal) {
@@ -85,6 +86,7 @@ export function taskToRow(t: Task) {
     effort: t.effort ?? null,
     is_recurring: t.isRecurring,
     completed_at: t.completedAt ?? null,
+    reschedule_count: t.rescheduleCount ?? 0,
     order: t.order,
     created_at: t.createdAt,
     updated_at: t.updatedAt,
@@ -152,6 +154,16 @@ export function snapshotToRow(s: ProgressSnapshot) {
     total_task_count: s.totalTaskCount,
     completed_milestone_count: s.completedMilestoneCount,
     total_milestone_count: s.totalMilestoneCount,
+  }
+}
+
+export function slipEventToRow(e: SlipEvent) {
+  return {
+    id: e.id,
+    task_id: e.taskId,
+    goal_id: e.goalId,
+    reason: e.reason,
+    at: e.at,
   }
 }
 

@@ -16,6 +16,9 @@ import { nanoid } from 'nanoid';
 import { db } from '../db';
 import type { Goal, ID, GoalStatus } from '@/core/types';
 import { deleteDependenciesReferencing } from './dependencyRepository';
+import { isCloudDataLive, cloudClient } from '@/database/backend';
+import { goalToRow } from '@/database/migration/toRows';
+import { goalFromRow } from '@/database/migration/fromRows';
 
 /**
  * Fields the CALLER provides. id/createdAt/updatedAt are generated here, so they
@@ -43,6 +46,14 @@ export async function createGoal(data: CreateGoalInput): Promise<Goal> {
     updatedAt: now,
   };
 
+  // The id/timestamp house rules above are shared; only the write target differs.
+  // Cloud: user_id defaults to auth.uid() server-side, so goalToRow omits it.
+  if (isCloudDataLive()) {
+    const { error } = await cloudClient().from('goals').insert(goalToRow(goal));
+    if (error) throw new Error(`createGoal: ${error.message}`);
+    return goal;
+  }
+
   await db.goals.add(goal);
   return goal;
 }
@@ -55,6 +66,15 @@ export async function createGoal(data: CreateGoalInput): Promise<Goal> {
  * is unknown, because "look this up, it may not exist" is a normal read.
  */
 export async function getGoalById(id: ID): Promise<Goal | undefined> {
+  if (isCloudDataLive()) {
+    const { data, error } = await cloudClient()
+      .from('goals')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+    if (error) throw new Error(`getGoalById: ${error.message}`);
+    return data ? goalFromRow(data) : undefined;
+  }
   return db.goals.get(id);
 }
 
@@ -72,6 +92,15 @@ export async function getGoalById(id: ID): Promise<Goal | undefined> {
  * cheaper than maintaining a dedicated index just for this ordering.
  */
 export async function getAllGoals(): Promise<Goal[]> {
+  if (isCloudDataLive()) {
+    const { data, error } = await cloudClient().from('goals').select('*');
+    if (error) throw new Error(`getAllGoals: ${error.message}`);
+    // Same in-memory newest-first ordering as the Dexie path (created_at is TEXT
+    // ISO, so lexicographic compare is chronological).
+    return (data ?? [])
+      .map(goalFromRow)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
   const all = await db.goals.toArray();
   return all.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
@@ -84,6 +113,14 @@ export async function getAllGoals(): Promise<Goal[]> {
  * This keeps the dashboard query cheap as the goal count grows.
  */
 export async function getGoalsByStatus(status: GoalStatus): Promise<Goal[]> {
+  if (isCloudDataLive()) {
+    const { data, error } = await cloudClient()
+      .from('goals')
+      .select('*')
+      .eq('status', status);
+    if (error) throw new Error(`getGoalsByStatus: ${error.message}`);
+    return (data ?? []).map(goalFromRow);
+  }
   return db.goals.where('status').equals(status).toArray();
 }
 
@@ -100,6 +137,29 @@ export async function updateGoal(
   id: ID,
   changes: Partial<Omit<Goal, 'id' | 'createdAt'>>,
 ): Promise<Goal> {
+  // Cloud: read-modify-write so the full row is re-mapped through goalToRow (no
+  // partial camel→snake mapper) and the "throw on missing id" contract holds. The
+  // updatedAt refresh matches the Dexie branch exactly.
+  if (isCloudDataLive()) {
+    const current = await getGoalById(id);
+    if (!current) {
+      throw new Error(`updateGoal: no goal found with id "${id}"`);
+    }
+    const merged: Goal = {
+      ...current,
+      ...changes,
+      id,
+      createdAt: current.createdAt,
+      updatedAt: new Date().toISOString(),
+    };
+    const { error } = await cloudClient()
+      .from('goals')
+      .update(goalToRow(merged))
+      .eq('id', id);
+    if (error) throw new Error(`updateGoal: ${error.message}`);
+    return merged;
+  }
+
   const updatedCount = await db.goals.update(id, {
     ...changes,
     updatedAt: new Date().toISOString(),
@@ -147,6 +207,39 @@ export async function updateGoal(
  * rows are removed.
  */
 export async function deleteGoal(id: ID): Promise<void> {
+  // Cloud: the Postgres FKs (0002) declare ON DELETE CASCADE from goals down through
+  // subgoals → milestones → tasks, plus goal_context / snapshots / slip_events, so a
+  // single goal delete removes the whole owned subtree server-side. Dependencies are
+  // POLYMORPHIC (no endpoint FK), so their edges must still be pruned by hand — we
+  // collect the subgoal + task ids BEFORE the cascade removes them. NOTE: unlike the
+  // Dexie branch this is not one atomic transaction (supabase-js has no client-side
+  // multi-statement tx); a mid-way failure is retried by re-deleting, and dangling
+  // edges are already tolerated by the engine.
+  if (isCloudDataLive()) {
+    const client = cloudClient();
+    const { data: subRows, error: subErr } = await client
+      .from('subgoals')
+      .select('id')
+      .eq('goal_id', id);
+    if (subErr) throw new Error(`deleteGoal: ${subErr.message}`);
+    const subgoalIds = (subRows ?? []).map((r) => r.id as ID);
+
+    let taskIds: ID[] = [];
+    if (subgoalIds.length > 0) {
+      const { data: taskRows, error: taskErr } = await client
+        .from('tasks')
+        .select('id')
+        .in('subgoal_id', subgoalIds);
+      if (taskErr) throw new Error(`deleteGoal: ${taskErr.message}`);
+      taskIds = (taskRows ?? []).map((r) => r.id as ID);
+    }
+
+    const { error } = await client.from('goals').delete().eq('id', id);
+    if (error) throw new Error(`deleteGoal: ${error.message}`);
+    await deleteDependenciesReferencing([...subgoalIds, ...taskIds]);
+    return;
+  }
+
   // Five tables exceed Dexie's variadic transaction overload, so the table list
   // is passed as an array (same transaction semantics).
   await db.transaction(

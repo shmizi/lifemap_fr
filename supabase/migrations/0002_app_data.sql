@@ -83,6 +83,7 @@ create table if not exists public.tasks (
   effort            text,
   is_recurring      boolean not null default false,
   completed_at      text,
+  reschedule_count  integer not null default 0,
   "order"           integer not null default 0,
   created_at        text not null,
   updated_at        text not null

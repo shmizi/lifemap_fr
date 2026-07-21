@@ -166,6 +166,18 @@
   }
 }
 
+/* Hide a scrollbar while keeping the element scrollable — used for the dashboard's
+   focus ledger so a long day scrolls within its box WITHOUT the stray mini bar. */
+@layer utilities {
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 /* ── Living-map motion ───────────────────────────────────────────────────────
    Roads draw themselves (normalized via pathLength=1), cities/towns rise in, and
    the "you are here" marker pulses. Reduced-motion users land on the END state

@@ -26,6 +26,7 @@ import type {
   Opportunity,
   UserContext,
   GoalContext,
+  SlipEvent,
 } from '@/core/types';
 import { DB_NAME, DB_VERSION, STORES } from '@/database/schema/stores';
 
@@ -46,6 +47,8 @@ export class LifeMapDB extends Dexie {
   // id; goalContext keyed by goalId (one row per goal).
   userContext!: Table<UserContext, string>;
   goalContext!: Table<GoalContext, string>;
+  // Stage 3 — the reschedule reason log (see stores.ts).
+  slipEvents!: Table<SlipEvent, string>;
 
   constructor() {
     super(DB_NAME);

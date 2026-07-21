@@ -71,6 +71,12 @@ export interface Task {
   effort?: EffortSize;                 // coarse size for effort-based momentum weighting
   isRecurring: boolean;
   completedAt?: ISODate;
+  // Durable slip history: how many times this task was pulled forward from overdue
+  // by a reschedule. Monotonic — set by the reschedule actions and never cleared by
+  // completing the task, so it survives catch-up. This is what lets Reliability
+  // (engine/health/computeReliability) remember a slip a reschedule would otherwise
+  // hide (it rewrites scheduledDate). Absent/0 for a task that has never slipped.
+  rescheduleCount?: number;
   order: number;
   createdAt: ISODate;
   updatedAt: ISODate;
@@ -82,6 +88,30 @@ export interface Dependency {
   toId: ID;
   type: 'subgoal' | 'task';
   createdAt: ISODate;
+}
+
+// Why a task slipped, captured when it is rescheduled (Stage 3 of the health model).
+// 'unspecified' is the value stored when the user skips the reason prompt, so the
+// event log stays complete (a skip is still a slip) while the pattern engine simply
+// ignores unspecified reasons. The five real reasons drive the pattern insights.
+export type SlipReason =
+  | 'higher_priority' // more urgent work bumped it
+  | 'no_time'         // ran out of time / over-committed
+  | 'not_motivated'   // didn't feel like it
+  | 'dependency'      // waiting on a prerequisite
+  | 'external'        // a blocker outside the user's control
+  | 'unspecified';    // the user skipped the prompt
+
+// One durable slip record: a task was pulled forward from overdue at time `at`, for
+// `reason`. Distinct from Task.rescheduleCount (a scalar tally) — this is the EVENT
+// LOG, so the pattern engine can window by time ("this month") and group by reason.
+// One row per task moved per reschedule; `goalId` is denormalised for direct grouping.
+export interface SlipEvent {
+  id: ID;
+  taskId: ID;
+  goalId: ID;
+  reason: SlipReason;
+  at: ISODate;
 }
 
 export interface UserProfile {

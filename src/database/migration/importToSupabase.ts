@@ -25,6 +25,7 @@ import {
   goalContextToRow,
   snapshotToRow,
   opportunityToRow,
+  slipEventToRow,
 } from '@/database/migration/toRows'
 
 export type ImportStatus =
@@ -89,6 +90,7 @@ export async function importLocalDataToSupabase(): Promise<ImportResult> {
     db.snapshots.toArray(),
     db.opportunities.toArray(),
   ])
+  const slipEvents = await db.slipEvents.toArray()
 
   // Upsert a batch (idempotent on its conflict key), returning how many rows landed.
   // Throws on error so the orchestration below can abort and report a clean retry.
@@ -117,6 +119,12 @@ export async function importLocalDataToSupabase(): Promise<ImportResult> {
       'goal_id',
     )
     counts.snapshots = await push('snapshots', snapshots.map(snapshotToRow), 'id')
+    // slip_events reference goals (goal_id FK), so they go after goals.
+    counts.slip_events = await push(
+      'slip_events',
+      slipEvents.map(slipEventToRow),
+      'id',
+    )
     counts.dependencies = await push(
       'dependencies',
       dependencies.map(dependencyToRow),

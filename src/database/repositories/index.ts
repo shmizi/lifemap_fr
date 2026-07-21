@@ -11,4 +11,5 @@ export * from './dependencyRepository';
 export * from './opportunityRepository';
 export * from './profileRepository';
 export * from './contextRepository';
+export * from './slipEventRepository';
 export { snapshotRepository } from './snapshotRepository';

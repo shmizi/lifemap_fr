@@ -11,6 +11,9 @@
 
 import { db } from '../db';
 import type { UserProfile } from '@/core/types';
+import { isCloudDataLive, cloudClient } from '@/database/backend';
+import { userProfileToRow } from '@/database/migration/toRows';
+import { userProfileFromRow } from '@/database/migration/fromRows';
 
 // The fixed primary key of the single profile row.
 export const PROFILE_ID = 'me';
@@ -23,6 +26,16 @@ export type SaveProfileInput = Omit<UserProfile, 'id' | 'createdAt' | 'updatedAt
  * saved — the Settings form treats that as "first-time setup" and seeds defaults.
  */
 export async function getProfile(): Promise<UserProfile | undefined> {
+  if (isCloudDataLive()) {
+    // ONE row per user; RLS scopes the read to the signed-in user's own row, so no id
+    // filter is needed. maybeSingle returns null before the profile has been saved.
+    const { data, error } = await cloudClient()
+      .from('user_profiles')
+      .select('*')
+      .maybeSingle();
+    if (error) throw new Error(`getProfile: ${error.message}`);
+    return data ? userProfileFromRow(data) : undefined;
+  }
   return db.profile.get(PROFILE_ID);
 }
 
@@ -37,13 +50,24 @@ export async function getProfile(): Promise<UserProfile | undefined> {
  */
 export async function saveProfile(input: SaveProfileInput): Promise<UserProfile> {
   const now = new Date().toISOString();
-  const existing = await db.profile.get(PROFILE_ID);
+  // Read the existing row through the dispatching getter so createdAt is preserved on
+  // whichever backend is live (mirrors the Dexie read-modify-write below).
+  const existing = await getProfile();
   const profile: UserProfile = {
     ...input,
     id: PROFILE_ID,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
+  if (isCloudDataLive()) {
+    // Upsert on user_id (the PK). user_id is omitted from the row and defaults to
+    // auth.uid() server-side, so the conflict target is the signed-in user's row.
+    const { error } = await cloudClient()
+      .from('user_profiles')
+      .upsert(userProfileToRow(profile), { onConflict: 'user_id' });
+    if (error) throw new Error(`saveProfile: ${error.message}`);
+    return profile;
+  }
   await db.profile.put(profile);
   return profile;
 }

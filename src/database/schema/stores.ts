@@ -24,7 +24,9 @@ export const DB_NAME = 'lifemap';
 // leaves every existing table untouched, so no data migration is needed.
 // v3 (Phase 9): added `userContext` (single row) + `goalContext` (per goal) for
 // AI personalization — same "new table only" change, existing data untouched.
-export const DB_VERSION = 3;
+// v4 (Stage 3 health): added `slipEvents` — the reschedule reason log. Again a
+// brand-new table, so existing data is untouched (Dexie creates the store on upgrade).
+export const DB_VERSION = 4;
 
 // Record<string, string> (not `as const`) so it slots cleanly into Dexie's
 // stores() parameter type, which expects a mutable string map.
@@ -67,4 +69,9 @@ export const STORES: Record<string, string> = {
   // per goal, keyed by goalId so a goal's intake is a direct lookup.
   userContext: 'id',
   goalContext: 'goalId',
+
+  // Stage 3 — reschedule reason log. Indexed by goalId (per-goal pattern queries)
+  // and by `at` (the time window, e.g. "last 30 days"). reason is filtered in
+  // memory. One row per task moved per reschedule.
+  slipEvents: 'id, goalId, at',
 };

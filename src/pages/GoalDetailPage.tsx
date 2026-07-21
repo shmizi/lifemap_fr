@@ -31,7 +31,8 @@ import { SubgoalCreationModal } from '@/features/goals/SubgoalCreationModal'
 import { GoalLearningsPanel } from '@/features/goals/GoalLearningsPanel'
 import { SuggestedSubgoalsModal } from '@/features/goals/SuggestedSubgoalsModal'
 import { GoalCreationModal } from '@/features/goals/GoalCreationModal'
-import type { Goal } from '@/core/types'
+import { SlipReasonModal } from '@/features/health/SlipReasonModal'
+import type { Goal, SlipReason } from '@/core/types'
 
 function categoryLabel(value: Goal['category']): string {
   return GOAL_CATEGORY_OPTIONS.find((o) => o.value === value)?.label ?? value
@@ -66,6 +67,9 @@ export function GoalDetailPage() {
   const rescheduleOverdueForGoal = useGoalStore((s) => s.rescheduleOverdueForGoal)
   const [isRescheduling, setIsRescheduling] = useState(false)
   const [rescheduleNote, setRescheduleNote] = useState<string | null>(null)
+  // Stage 3 — the reschedule reason prompt + the goal's dominant slip pattern.
+  const [reasonOpen, setReasonOpen] = useState(false)
+  const slipInsight = useGoalStore((s) => s.currentGoalSlipInsight)
 
   // Manual de-dup: sweep near-identical task titles across this goal's subgoals and
   // drop the later copies (the same pass generateFullRoadmap runs automatically).
@@ -130,12 +134,13 @@ export function GoalDetailPage() {
   // Move this goal's missed tasks forward onto upcoming working days (capacity- and
   // deadline-aware in the store). The store refreshes the tree, so overdueCount
   // recomputes and the nudge clears on success.
-  async function handleReschedule() {
+  async function handleReschedule(reason: SlipReason) {
     if (isRescheduling) return
     setIsRescheduling(true)
     setRescheduleNote(null)
     try {
-      const moved = await rescheduleOverdueForGoal(goal.id)
+      const moved = await rescheduleOverdueForGoal(goal.id, reason)
+      setReasonOpen(false)
       setRescheduleNote(
         moved > 0
           ? `Moved ${moved} missed task${moved === 1 ? '' : 's'} onto your upcoming days.`
@@ -285,7 +290,7 @@ export function GoalDetailPage() {
           </p>
           <button
             type="button"
-            onClick={handleReschedule}
+            onClick={() => setReasonOpen(true)}
             disabled={isRescheduling}
             className="inline-flex items-center gap-1.5 border border-app-border px-3 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-app-text transition hover:bg-app-surface-alt disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
           >
@@ -296,6 +301,12 @@ export function GoalDetailPage() {
       ) : null}
       {rescheduleNote ? (
         <p className="mt-2 text-xs text-app-text-muted">{rescheduleNote}</p>
+      ) : null}
+
+      {/* Stage 3 — the dominant slip PATTERN for this goal (why work keeps slipping),
+          drawn from its reschedule reason log. A calm, actionable read, not a scold. */}
+      {slipInsight ? (
+        <p className="mt-2 text-xs text-amber-600">{slipInsight.text}</p>
       ) : null}
 
       {/* Hard-deadline escalation: when the goal is projected to miss a deadline that
@@ -434,6 +445,14 @@ export function GoalDetailPage() {
         goalId={goal.id}
         open={isStructureReviewOpen}
         onClose={() => setIsStructureReviewOpen(false)}
+      />
+
+      <SlipReasonModal
+        isOpen={reasonOpen}
+        onClose={() => setReasonOpen(false)}
+        onSelect={handleReschedule}
+        isBusy={isRescheduling}
+        count={overdueCount}
       />
     </section>
   )

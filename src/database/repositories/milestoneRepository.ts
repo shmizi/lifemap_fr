@@ -17,6 +17,9 @@
 import { nanoid } from 'nanoid';
 import { db } from '@/database/db';
 import type { ID, Milestone, MilestoneStatus } from '@/core/types';
+import { isCloudDataLive, cloudClient } from '@/database/backend';
+import { milestoneToRow } from '@/database/migration/toRows';
+import { milestoneFromRow, taskFromRow } from '@/database/migration/fromRows';
 
 /**
  * Fields the CALLER must provide. id and createdAt are generated here, so they
@@ -42,11 +45,27 @@ export async function createMilestone(
     id: nanoid(),
     createdAt: new Date().toISOString(),
   };
+  if (isCloudDataLive()) {
+    const { error } = await cloudClient()
+      .from('milestones')
+      .insert(milestoneToRow(milestone));
+    if (error) throw new Error(`createMilestone: ${error.message}`);
+    return milestone;
+  }
   await db.milestones.add(milestone);
   return milestone;
 }
 
 export async function getMilestoneById(id: ID): Promise<Milestone | undefined> {
+  if (isCloudDataLive()) {
+    const { data, error } = await cloudClient()
+      .from('milestones')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+    if (error) throw new Error(`getMilestoneById: ${error.message}`);
+    return data ? milestoneFromRow(data) : undefined;
+  }
   // Primary-key lookup — `id` is the store's key, so this is a direct get().
   return db.milestones.get(id);
 }
@@ -58,6 +77,14 @@ export async function getMilestonesBySubgoalId(
   // so we query via the index instead of scanning the whole table — consistent
   // with getSubgoalsByGoalId and getTasksBySubgoalId. `order` is not indexed, so
   // that sort stays in memory (same convention as the other by-parent getters).
+  if (isCloudDataLive()) {
+    const { data, error } = await cloudClient()
+      .from('milestones')
+      .select('*')
+      .eq('subgoal_id', subgoalId);
+    if (error) throw new Error(`getMilestonesBySubgoalId: ${error.message}`);
+    return (data ?? []).map(milestoneFromRow).sort((a, b) => a.order - b.order);
+  }
   const milestones = await db.milestones
     .where('subgoalId')
     .equals(subgoalId)
@@ -68,6 +95,14 @@ export async function getMilestonesBySubgoalId(
 export async function getMilestonesByStatus(
   status: MilestoneStatus
 ): Promise<Milestone[]> {
+  if (isCloudDataLive()) {
+    const { data, error } = await cloudClient()
+      .from('milestones')
+      .select('*')
+      .eq('status', status);
+    if (error) throw new Error(`getMilestonesByStatus: ${error.message}`);
+    return (data ?? []).map(milestoneFromRow);
+  }
   // In-memory filter — `status` is not indexed (consistent with subgoals, where
   // getSubgoalsByStatus also filters in memory). Milestone counts are tiny.
   const all = await db.milestones.toArray();
@@ -78,6 +113,26 @@ export async function updateMilestone(
   id: ID,
   changes: UpdateMilestoneInput
 ): Promise<void> {
+  // Cloud: read-modify-write reusing milestoneToRow, upholding throw-on-missing-id.
+  // Like the Dexie branch, no updatedAt is refreshed — Milestone has none.
+  if (isCloudDataLive()) {
+    const current = await getMilestoneById(id);
+    if (!current) {
+      throw new Error(`updateMilestone: no milestone found with id "${id}"`);
+    }
+    const merged: Milestone = {
+      ...current,
+      ...changes,
+      id,
+      createdAt: current.createdAt,
+    };
+    const { error } = await cloudClient()
+      .from('milestones')
+      .update(milestoneToRow(merged))
+      .eq('id', id);
+    if (error) throw new Error(`updateMilestone: ${error.message}`);
+    return;
+  }
   // Dexie's update() returns the number of rows modified; 0 means no row matched
   // the id — we throw, matching the updateGoal / updateSubgoal contract.
   // IMPORTANT: unlike subgoals, we do NOT refresh an updatedAt — Milestone has none.
@@ -107,6 +162,55 @@ export async function deleteMilestone(id: ID): Promise<void> {
   // Clearing milestoneId: passing `undefined` to Dexie's update() DELETES the
   // property, which also removes the row from the milestoneId index (verified by
   // a dedicated test in taskRepository.test.ts).
+  //
+  // Cloud: Postgres has ON DELETE SET NULL on tasks.milestone_id, but that only
+  // clears the link — it does NOT re-sequence the rehomed tasks onto the end of the
+  // subgoal's loose-task order. So we replicate the exact read-modify-write here
+  // (clear milestone_id + append order) and then delete the milestone. Not one atomic
+  // tx (supabase-js limitation); a mid-way failure leaves rows re-homed but the
+  // milestone present, which a re-run finishes idempotently.
+  if (isCloudDataLive()) {
+    const client = cloudClient();
+    const { data: mRow, error: mErr } = await client
+      .from('milestones')
+      .select('subgoal_id')
+      .eq('id', id)
+      .maybeSingle();
+    if (mErr) throw new Error(`deleteMilestone: ${mErr.message}`);
+    if (!mRow) return; // unknown id -> nothing to do (idempotent)
+
+    const { data: taskRows, error: tErr } = await client
+      .from('tasks')
+      .select('*')
+      .eq('subgoal_id', mRow.subgoal_id as ID);
+    if (tErr) throw new Error(`deleteMilestone: ${tErr.message}`);
+    const subgoalTasks = (taskRows ?? []).map(taskFromRow);
+
+    const looseOrders = subgoalTasks
+      .filter((t) => t.milestoneId === undefined)
+      .map((t) => t.order);
+    let nextOrder = looseOrders.length === 0 ? 0 : Math.max(...looseOrders) + 1;
+
+    const milestoneTasks = subgoalTasks
+      .filter((t) => t.milestoneId === id)
+      .sort((a, b) => a.order - b.order);
+    const now = new Date().toISOString();
+    for (const task of milestoneTasks) {
+      const { error } = await client
+        .from('tasks')
+        .update({ milestone_id: null, order: nextOrder, updated_at: now })
+        .eq('id', task.id);
+      if (error) throw new Error(`deleteMilestone: ${error.message}`);
+      nextOrder += 1;
+    }
+
+    const { error: delErr } = await client
+      .from('milestones')
+      .delete()
+      .eq('id', id);
+    if (delErr) throw new Error(`deleteMilestone: ${delErr.message}`);
+    return;
+  }
   await db.transaction('rw', db.milestones, db.tasks, async () => {
     const milestone = await db.milestones.get(id);
     if (!milestone) return; // unknown id -> nothing to do (idempotent)

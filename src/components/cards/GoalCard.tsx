@@ -33,6 +33,20 @@ function categoryLabel(value: Goal['category']): string {
   return GOAL_CATEGORY_OPTIONS.find((o) => o.value === value)?.label ?? value
 }
 
+// Risk level → its status dot + label (same calm dot vocabulary as the pace badge).
+const RISK_DOT = {
+  low: 'bg-emerald-600',
+  medium: 'bg-amber-600',
+  high: 'bg-red-600',
+} as const
+const RISK_LABEL = { low: 'Low', medium: 'Medium', high: 'High' } as const
+// Insight tone → text colour. Calm: a caution is amber, a warning red, praise muted.
+const INSIGHT_TONE = {
+  positive: 'text-app-text-muted',
+  caution: 'text-amber-600',
+  warning: 'text-red-600',
+} as const
+
 export function GoalCard({ goal, index }: GoalCardProps) {
   const setSelectedGoalId = useGoalStore((s) => s.setSelectedGoalId)
   const removeGoal = useGoalStore((s) => s.removeGoal)
@@ -160,6 +174,51 @@ export function GoalCard({ goal, index }: GoalCardProps) {
               <div className="h-[3px] bg-app-text" style={{ width: `${progress.percent}%` }} />
             </div>
           </div>
+        ) : null}
+
+        {/* Reliability — the SEPARATE "how well have I kept my plans" signal, paired
+            with Progress as a second ruled bar. Shown once there's history to judge
+            (a completed or missed task) and hidden for finished goals, mirroring the
+            pace badge. A reschedule / late finish / open miss dents it durably; it
+            recovers with recent consistency (see computeReliability). */}
+        {health && health.reliability.status !== 'no_history' && !isFinished ? (
+          <div className="mt-2">
+            <div className="flex items-baseline justify-between font-mono text-[10px] uppercase tracking-[0.14em] text-app-text-muted">
+              <span>Reliability</span>
+              <span className="tabular-nums text-app-text">
+                {health.reliability.score}%
+              </span>
+            </div>
+            <div className="mt-1.5 h-[3px] w-full bg-app-border">
+              <div
+                className="h-[3px] bg-app-text"
+                style={{ width: `${health.reliability.score}%` }}
+              />
+            </div>
+          </div>
+        ) : null}
+
+        {/* Risk — the blended Low/Med/High top-line, as a labelled dot (same calm
+            vocabulary as the pace badge). Gated like the other signals. */}
+        {health && health.status !== 'no_tasks' && !isFinished ? (
+          <div className="mt-2 flex items-baseline justify-between font-mono text-[10px] uppercase tracking-[0.14em] text-app-text-muted">
+            <span>Risk</span>
+            <span className="inline-flex items-center gap-1.5 text-app-text">
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${RISK_DOT[health.risk.level]}`}
+                aria-hidden
+              />
+              {RISK_LABEL[health.risk.level]}
+            </span>
+          </div>
+        ) : null}
+
+        {/* Interpretation — the single most-important plain-language read of the
+            signals (Stage 2). A sentence, not a siren; toned by severity. */}
+        {health && !isFinished && health.insights.length > 0 ? (
+          <p className={`mt-3 text-xs ${INSIGHT_TONE[health.insights[0].tone]}`}>
+            {health.insights[0].text}
+          </p>
         ) : null}
 
         {/* Right padding leaves room for the delete control. */}

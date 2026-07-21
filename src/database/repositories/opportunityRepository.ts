@@ -22,6 +22,9 @@
 import { nanoid } from 'nanoid';
 import { db } from '../db';
 import type { ID, Opportunity } from '@/core/types';
+import { isCloudDataLive, cloudClient } from '@/database/backend';
+import { opportunityToRow } from '@/database/migration/toRows';
+import { opportunityFromRow } from '@/database/migration/fromRows';
 
 /**
  * Fields the CALLER provides. `id` and `savedAt` are generated here, so they are
@@ -51,12 +54,28 @@ export async function createOpportunity(
     id: nanoid(),
     savedAt: new Date().toISOString(),
   };
+  if (isCloudDataLive()) {
+    const { error } = await cloudClient()
+      .from('opportunities')
+      .insert(opportunityToRow(opportunity));
+    if (error) throw new Error(`createOpportunity: ${error.message}`);
+    return opportunity;
+  }
   await db.opportunities.add(opportunity);
   return opportunity;
 }
 
 /** Fetch a single opportunity by primary key. Undefined (not an error) when unknown. */
 export async function getOpportunityById(id: ID): Promise<Opportunity | undefined> {
+  if (isCloudDataLive()) {
+    const { data, error } = await cloudClient()
+      .from('opportunities')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+    if (error) throw new Error(`getOpportunityById: ${error.message}`);
+    return data ? opportunityFromRow(data) : undefined;
+  }
   return db.opportunities.get(id);
 }
 
@@ -74,6 +93,13 @@ export async function getOpportunityById(id: ID): Promise<Opportunity | undefine
  * catalogue is small, so an in-memory sort is cheaper than a dedicated index.
  */
 export async function getAllOpportunities(): Promise<Opportunity[]> {
+  if (isCloudDataLive()) {
+    const { data, error } = await cloudClient().from('opportunities').select('*');
+    if (error) throw new Error(`getAllOpportunities: ${error.message}`);
+    return (data ?? [])
+      .map(opportunityFromRow)
+      .sort((a, b) => b.savedAt.localeCompare(a.savedAt));
+  }
   const all = await db.opportunities.toArray();
   return all.sort((a, b) => b.savedAt.localeCompare(a.savedAt));
 }
@@ -90,6 +116,26 @@ export async function updateOpportunity(
   id: ID,
   changes: UpdateOpportunityInput,
 ): Promise<void> {
+  // Cloud: read-modify-write via the full opportunityToRow mapper; upholds
+  // throw-on-missing-id. No updatedAt to refresh (Opportunity has none).
+  if (isCloudDataLive()) {
+    const current = await getOpportunityById(id);
+    if (!current) {
+      throw new Error(`updateOpportunity: no opportunity found with id "${id}"`);
+    }
+    const merged: Opportunity = {
+      ...current,
+      ...changes,
+      id,
+      savedAt: current.savedAt,
+    };
+    const { error } = await cloudClient()
+      .from('opportunities')
+      .update(opportunityToRow(merged))
+      .eq('id', id);
+    if (error) throw new Error(`updateOpportunity: ${error.message}`);
+    return;
+  }
   const updatedCount = await db.opportunities.update(id, changes);
   if (updatedCount === 0) {
     throw new Error(`updateOpportunity: no opportunity found with id "${id}"`);
@@ -104,5 +150,13 @@ export async function updateOpportunity(
  * alongside it. Deleting an unknown id stays a no-op (Dexie's delete is idempotent).
  */
 export async function deleteOpportunity(id: ID): Promise<void> {
+  if (isCloudDataLive()) {
+    const { error } = await cloudClient()
+      .from('opportunities')
+      .delete()
+      .eq('id', id);
+    if (error) throw new Error(`deleteOpportunity: ${error.message}`);
+    return;
+  }
   await db.opportunities.delete(id);
 }
