@@ -17,7 +17,7 @@
 
 export const config = { runtime: 'edge' }
 
-const DEFAULT_MODEL_QUALITY = 'claude-sonnet-4-6'
+const DEFAULT_MODEL_QUALITY = 'claude-sonnet-5'
 const DEFAULT_MODEL_FAST = 'claude-haiku-4-5-20251001'
 const DEFAULT_MAX_TOKENS = 4096
 // Free-tier cap: AI generations per user per calendar month, overridable via env.

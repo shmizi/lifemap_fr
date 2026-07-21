@@ -62,7 +62,7 @@ let subscribed = false
 // within a session. On error it stays false so a later sign-in can retry.
 let importTriggered = false
 
-export const useAuthStore = create<AuthState>()((set, get) => {
+export const useAuthStore = create<AuthState>()((set) => {
   // Read the signed-in user's profile row (edition + join year). RLS restricts the
   // read to their own row; a missing row (trigger lag on a brand-new signup) simply
   // leaves profile null and the colophon falls back — never throws into the UI.

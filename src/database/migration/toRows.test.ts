@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest'
 import type {
   Goal,
   Subgoal,
-  Milestone,
   Task,
   GoalContext,
   UserProfile,
@@ -11,7 +10,6 @@ import type {
 import {
   goalToRow,
   subgoalToRow,
-  milestoneToRow,
   taskToRow,
   goalContextToRow,
   userProfileToRow,
