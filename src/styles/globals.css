@@ -200,3 +200,21 @@
             animation: lm-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) backwards; }
 .lm-pulse { transform-box: fill-box; transform-origin: center;
             animation: lm-pulse 2.3s ease-out infinite; }
+
+/* ── Dashboard "Total realization" figure — flash on change ───────────────────
+   When a task is ticked the percentage recomputes; the figure briefly STAMPS as
+   inverted ink (paper-on-ink, max contrast) with a small pop, then settles back to
+   its resting ink-on-paper. Theme-aware via the --color-* tokens, so it inverts
+   correctly in dark mode too. Anchored at the right edge (it's a right-aligned
+   figure) so the pop never overflows the masthead. Reduced-motion users skip the
+   motion via the global override; it is re-fired by remounting the span (key). */
+@keyframes realization-flash {
+  0%   { background-color: var(--color-text); color: var(--color-surface); transform: scale(1.07); }
+  55%  { background-color: var(--color-text); color: var(--color-surface); transform: scale(1); }
+  100% { background-color: transparent;       color: var(--color-text);    transform: scale(1); }
+}
+.animate-realization-flash {
+  animation: realization-flash 0.6s ease-out;
+  transform-origin: right center;
+  border-radius: 0.1em;
+}

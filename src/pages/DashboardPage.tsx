@@ -11,7 +11,7 @@
 // dependency plate. The page still owns the two data loads and holds no business
 // logic: the store assembles, these presentational pieces render.
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { format } from 'date-fns'
 import { useGoalStore } from '@/store/useGoalStore'
@@ -41,6 +41,10 @@ export function DashboardPage() {
   const topPriorityTasks = useGoalStore((s) => s.topPriorityTasks)
   const overdueTasks = useGoalStore((s) => s.overdueTasks)
   const todayEffort = useGoalStore((s) => s.todayEffort)
+  // Per-goal progress — the SAME source the goal cards use, and (unlike lifeMap) it
+  // is refreshed on every task mutation, so the headline figure below updates live
+  // the moment a task is ticked.
+  const goalProgress = useGoalStore((s) => s.goalProgress)
   const toggleTaskComplete = useGoalStore((s) => s.toggleTaskComplete)
   const rescheduleAllOverdue = useGoalStore((s) => s.rescheduleAllOverdue)
   const loadDashboard = useGoalStore((s) => s.loadDashboard)
@@ -75,9 +79,30 @@ export function DashboardPage() {
     [lifeMap],
   )
   const townCount = (lifeMap?.nodes.length ?? 0) - cities.length
-  const overallPercent = cities.length
-    ? Math.round(cities.reduce((sum, c) => sum + c.percent, 0) / cities.length)
-    : 0
+  // Total realization = mean completion across all goals, read from the live
+  // goalProgress map (not the lifeMap cities, which only rebuild on a full reload).
+  const overallPercent = useMemo(() => {
+    const entries = Object.values(goalProgress)
+    if (entries.length === 0) return 0
+    return Math.round(
+      entries.reduce((sum, p) => sum + p.percent, 0) / entries.length,
+    )
+  }, [goalProgress])
+
+  // Flash the figure whenever it changes (a tick recomputes it). Bumping a key
+  // remounts the span so the CSS animation re-fires on every change; the first
+  // render is skipped (ref starts null) so it doesn't flash before any interaction.
+  const [pulseKey, setPulseKey] = useState(0)
+  const prevPercentRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (
+      prevPercentRef.current !== null &&
+      prevPercentRef.current !== overallPercent
+    ) {
+      setPulseKey((k) => k + 1)
+    }
+    prevPercentRef.current = overallPercent
+  }, [overallPercent])
 
   // Today first; fall back to the cross-goal priority list when nothing's planned.
   const focusTasks = todaysTasks.length > 0 ? todaysTasks : topPriorityTasks
@@ -126,8 +151,15 @@ export function DashboardPage() {
             </p>
           </div>
           <div className="shrink-0 text-right">
-            <div className="font-display text-[2.6rem] font-semibold italic leading-none tracking-tight text-app-text">
-              {overallPercent}%
+            {/* leading relaxed from `none` so the italic figure isn't clipped at the
+                top; the inner span is remounted by pulseKey so the flash re-fires. */}
+            <div className="font-display text-[2.6rem] font-semibold italic leading-[1.15] tracking-tight text-app-text">
+              <span
+                key={pulseKey}
+                className={`inline-block ${pulseKey > 0 ? 'animate-realization-flash' : ''}`}
+              >
+                {overallPercent}%
+              </span>
             </div>
             <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.2em] text-app-text-muted">
               Total realization
