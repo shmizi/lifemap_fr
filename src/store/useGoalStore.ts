@@ -1396,21 +1396,44 @@ export const useGoalStore = create<GoalState>()((set, get) => {
     // in_progress/skipped.
     toggleTaskComplete: async (task) => {
       const markingComplete = task.status !== 'completed'
-      await updateTask(
-        task.id,
-        markingComplete
-          ? { status: 'completed', completedAt: new Date().toISOString() }
-          : { status: 'pending', completedAt: undefined },
-      )
-      // Auto-complete (or re-open) the parent milestone per the spec'd rule.
-      // Loose tasks (no milestoneId) have no milestone to reconcile. Run before
-      // the refreshes so the tree picks up the milestone's new status too.
-      if (task.milestoneId) await reconcileMilestone(task.milestoneId)
-      await settleRefreshes([
-        refreshCurrentTree(),
-        refreshDashboard(),
-        refreshCrossGoal(),
-      ])
+      const nextStatus = markingComplete ? 'completed' : 'pending'
+      const completedAt = markingComplete ? new Date().toISOString() : undefined
+
+      // OPTIMISTIC: reflect the tick in the on-screen lists immediately so the
+      // checkbox responds instantly. The write + refresh is a network round-trip on
+      // the cloud backend, which would otherwise leave the tick feeling laggy. The
+      // refreshes in `finally` reconcile with authoritative data — and, if the write
+      // failed, restore the truth (the DB is then unchanged, so the tick is undone).
+      const applyStatus = (list: Task[]): Task[] =>
+        list.map((t) =>
+          t.id === task.id ? { ...t, status: nextStatus, completedAt } : t,
+        )
+      set((s) => ({
+        todaysTasks: applyStatus(s.todaysTasks),
+        thisWeekTasks: applyStatus(s.thisWeekTasks),
+        topPriorityTasks: applyStatus(s.topPriorityTasks),
+        overdueTasks: markingComplete
+          ? s.overdueTasks.filter((t) => t.id !== task.id)
+          : s.overdueTasks,
+      }))
+
+      try {
+        await updateTask(
+          task.id,
+          markingComplete
+            ? { status: 'completed', completedAt }
+            : { status: 'pending', completedAt: undefined },
+        )
+        // Auto-complete (or re-open) the parent milestone per the spec'd rule.
+        // Loose tasks (no milestoneId) have no milestone to reconcile.
+        if (task.milestoneId) await reconcileMilestone(task.milestoneId)
+      } finally {
+        await settleRefreshes([
+          refreshCurrentTree(),
+          refreshDashboard(),
+          refreshCrossGoal(),
+        ])
+      }
     },
 
     // --- weekly review ---

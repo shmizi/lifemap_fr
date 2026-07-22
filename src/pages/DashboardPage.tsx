@@ -150,10 +150,11 @@ export function DashboardPage() {
               Registry of active &amp; latent intentions · {format(now, 'd LLLL yyyy')}
             </p>
           </div>
-          <div className="shrink-0 text-right">
-            {/* leading relaxed from `none` so the italic figure isn't clipped at the
-                top; the inner span is remounted by pulseKey so the flash re-fires. */}
-            <div className="font-display text-[2.6rem] font-semibold italic leading-[1.15] tracking-tight text-app-text">
+          {/* pr gives the italic “%” (which leans right) and the sweep highlight room
+              so neither is clipped by the masthead's overflow-hidden edge; leading is
+              relaxed so the tall figure isn't clipped at the top either. */}
+          <div className="shrink-0 pr-[0.32em] text-right">
+            <div className="font-display text-[2.6rem] font-semibold italic leading-[1.22] tracking-tight text-app-text">
               <span
                 key={pulseKey}
                 className={`inline-block ${pulseKey > 0 ? 'animate-realization-flash' : ''}`}
