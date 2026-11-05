@@ -36,7 +36,9 @@ interface AnthropicMessagesResponse {
   error?: { message?: string }
 }
 
-const DEFAULT_MODEL_QUALITY = 'claude-sonnet-4-6'
+// Keep these in step with api/ai.ts (the production edge proxy) — a drift here
+// means local dev silently exercises a different model than the deployed app.
+const DEFAULT_MODEL_QUALITY = 'claude-sonnet-5'
 const DEFAULT_MODEL_FAST = 'claude-haiku-4-5-20251001'
 const DEFAULT_MAX_TOKENS = 4096
 

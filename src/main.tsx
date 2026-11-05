@@ -24,6 +24,11 @@ onBackendChange(() => {
   const store = useGoalStore.getState()
   void store.loadGoals()
   void store.loadDashboard()
+  // The life map too: the Dashboard gates its ENTIRE render on it (no map -> the
+  // "register is empty" screen), and its hook loads it once on mount. Without this
+  // a user who signs in while the Dashboard is open keeps staring at the empty
+  // state even though their goals have already arrived from the cloud backend.
+  void store.loadLifeMap()
 })
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

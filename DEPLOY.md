@@ -11,10 +11,13 @@ however, **requires sign-in** — the AI proxy rejects anonymous calls (see belo
 
 ## 0. Prerequisites (once)
 
-- Supabase project `krvongccwumxuerhyfun` with migrations **0001 → 0004 run in order**
+- Supabase project `krvongccwumxuerhyfun` with migrations **0001 → 0005 run in order**
   (`supabase/migrations/`). 0001 = profiles/edition, 0002 = app data, 0003 = AI quota,
-  0004 = slip events. Real AI works without 0003 (quota fails open) but you lose the
-  per-user monthly cap, so run it.
+  0004 = slip events, 0005 = goal reference documents. Real AI works without 0003
+  (quota fails open) but you lose the per-user monthly cap, so run it. **0005 is not
+  optional: run it BEFORE deploying this code.** Every write to `goal_context` sends
+  `source_document`, so without the column signed-in users can't save goal intake,
+  strategy briefs or learnings.
 - An **Anthropic API key** with billing enabled (this key pays for every generation —
   see "Cost" at the bottom).
 - The repo pushed to a Git provider Vercel can import.

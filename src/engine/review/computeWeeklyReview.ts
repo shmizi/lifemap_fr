@@ -18,6 +18,7 @@
 import { format, parseISO, subDays } from 'date-fns'
 import type { ISODate, Task } from '@/core/types'
 import { computeEffortMomentum } from '@/engine/progress/computeEffortMomentum'
+import { isOverdue } from '@/engine/planning/isOverdue'
 
 export interface DailyMomentumPoint {
   date: ISODate // date-only YYYY-MM-DD
@@ -66,8 +67,7 @@ export function computeWeeklyReview(tasks: Task[], now: Date): WeeklyReviewData 
     (t) =>
       t.scheduledDate !== undefined &&
       inWindow(t.scheduledDate) &&
-      t.scheduledDate < today &&
-      t.status !== 'completed',
+      isOverdue(t, today),
   )
 
   // One momentum percent per day, over the tasks scheduled for that day, via the

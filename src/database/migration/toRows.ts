@@ -139,6 +139,7 @@ export function goalContextToRow(c: GoalContext) {
     learnings: c.learnings ?? null,
     // Stored as jsonb; supabase-js serialises the object directly.
     strategy_brief: c.strategyBrief ?? null,
+    source_document: c.sourceDocument ?? null,
     created_at: c.createdAt,
     updated_at: c.updatedAt,
   }

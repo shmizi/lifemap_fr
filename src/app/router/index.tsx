@@ -7,6 +7,7 @@ import {
   GoalDetailPage,
   PhaseCheckInPage,
   WeeklyReviewPage,
+  RoadmapPage,
   DiscoveryPage,
   SettingsPage,
 } from '@/app/router/lazyPages'
@@ -26,9 +27,12 @@ export const router = createBrowserRouter([
       { path: ROUTES.GOAL_DETAIL,  element: <GoalDetailPage /> },
       // Phase-end check-in (Phase 10) — a guided 3-beat flow for a completed phase.
       { path: ROUTES.PHASE_CHECK_IN, element: <PhaseCheckInPage /> },
-      // No standalone Roadmap screen: subgoal dependencies are AI-decided, not a
-      // user-facing map. The roadmap ENGINE (buildRoadmap) + store (loadRoadmap)
-      // stay for derived signals; RoadmapPage.tsx is unrouted (kept on disk only).
+      // The Roadmap screen is routed again. It was unrouted on the reasoning that
+      // subgoal dependencies were AI-decided rather than user-facing — but the
+      // "Depends on" panel on Goal Detail makes them user-authored, so a map of
+      // what supports what is now something the user can actually act on. Reading
+      // that map is this screen; editing it stays on Goal Detail.
+      { path: ROUTES.ROADMAP,      element: <RoadmapPage /> },
       { path: ROUTES.REVIEWS,      element: <WeeklyReviewPage /> },
       { path: ROUTES.DISCOVERY,    element: <DiscoveryPage /> },
       { path: ROUTES.SETTINGS,     element: <SettingsPage /> },

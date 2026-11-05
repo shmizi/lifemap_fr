@@ -28,6 +28,7 @@ import {
 } from '@/database/repositories'
 import { topologicalSort } from '@/engine/dependencies/topologicalSort'
 import { wouldCreateCycle } from '@/engine/dependencies/detectCycle'
+import { useGoalStore } from '@/store/useGoalStore'
 
 // One graph kind. Sourced from the canonical type so it never drifts.
 export type DependencyType = Dependency['type']
@@ -73,6 +74,23 @@ export const useDependencyStore = create<DependencyState>()((set, get) => {
     applyGraph(type, await getDependenciesByType(type))
   }
 
+  // Tell useGoalStore to recompute the caches DERIVED from the subgoal graph — the
+  // per-goal "lagging foundation" note and the active-support counts that feed the
+  // priority ranking. Without this an added edge persists but its downstream signals
+  // stay stale until the next full load, which is what made the dependency feature
+  // look inert even when edges existed.
+  //
+  // A deliberate ONE-WAY cross-store call via getState() (useGoalStore never imports
+  // this store, so there is no cycle) — the same seam useDiscoveryStore.addToPlan
+  // uses. Only the 'subgoal' graph feeds those signals; the task graph has no
+  // derived cache, so it skips. Best-effort by construction: refreshDependencySignals
+  // routes through settleRefreshes and never throws, so a failed re-read can't make
+  // the already-saved edge look like it failed.
+  const refreshGoalSignals = async (type: DependencyType): Promise<void> => {
+    if (type !== 'subgoal') return
+    await useGoalStore.getState().refreshDependencySignals()
+  }
+
   return {
     dependencies: [],
     loadedType: null,
@@ -102,6 +120,7 @@ export const useDependencyStore = create<DependencyState>()((set, get) => {
       }
       const dependency = await createDependency(input)
       if (input.type === get().loadedType) await refreshLoaded()
+      await refreshGoalSignals(input.type)
       return { ok: true, dependency }
     },
 
@@ -111,6 +130,13 @@ export const useDependencyStore = create<DependencyState>()((set, get) => {
     removeDependency: async (id) => {
       await deleteDependency(id)
       await refreshLoaded()
+      // Refresh UNCONDITIONALLY. Only the id is in hand here, not the removed
+      // edge's type, and the obvious shortcut — keying off `loadedType` — is wrong:
+      // it is null unless some view happens to have loaded a graph, so a remove
+      // would silently leave the derived signals stale. Recomputing when the edge
+      // was actually a task edge is merely redundant; skipping when it was a
+      // subgoal edge is a bug, so this errs to the harmless side.
+      await refreshGoalSignals('subgoal')
     },
   }
 })

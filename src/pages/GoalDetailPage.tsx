@@ -20,7 +20,9 @@ import {
 import { format, parseISO } from 'date-fns'
 import { ROUTES, GOAL_CATEGORY_OPTIONS } from '@/core/constants'
 import { googleCalendarUrl } from '@/core/utils/googleCalendar'
+import { isOverdue } from '@/engine/planning/isOverdue'
 import { useGoalTree } from '@/core/hooks/useGoalTree'
+import { useDependencyGraph } from '@/core/hooks/useDependencyGraph'
 import { useGoalStore } from '@/store/useGoalStore'
 import { ProgressRing } from '@/components/progress/ProgressRing'
 import { SubgoalSection } from '@/features/goals/SubgoalSection'
@@ -29,6 +31,8 @@ import { ScopeCutNudge } from '@/features/goals/ScopeCutNudge'
 import { StructureReviewModal } from '@/features/goals/StructureReviewModal'
 import { SubgoalCreationModal } from '@/features/goals/SubgoalCreationModal'
 import { GoalLearningsPanel } from '@/features/goals/GoalLearningsPanel'
+import { GoalDocumentPanel } from '@/features/goals/GoalDocumentPanel'
+import { PlanRevisionPanel } from '@/features/goals/PlanRevisionPanel'
 import { SuggestedSubgoalsModal } from '@/features/goals/SuggestedSubgoalsModal'
 import { GoalCreationModal } from '@/features/goals/GoalCreationModal'
 import { SlipReasonModal } from '@/features/health/SlipReasonModal'
@@ -44,6 +48,18 @@ export function GoalDetailPage() {
   // the (in practice unreachable) empty case.
   const { id = '' } = useParams<{ id: string }>()
   const { tree, isLoading } = useGoalTree(id)
+  // The SOFT subgoal dependency graph, loaded once for the whole page and handed
+  // down to each section's "Depends on" panel — one read for the goal rather than
+  // one per subgoal. Keyed on this goal's subgoal ids so that adding or deleting a
+  // subgoal re-pulls the edges and drops any that just became dangling (a cascade
+  // delete removes edge rows out-of-band, which this store can't otherwise hear).
+  const subgoalIdsKey = (tree?.subgoals ?? [])
+    .map((st) => st.subgoal.id)
+    .join(',')
+  const { dependencies: subgoalEdges } = useDependencyGraph(
+    'subgoal',
+    subgoalIdsKey,
+  )
   // Whole-goal momentum, derived from the same tree by the store. Shown in the
   // header above the per-subgoal rings; hidden until the goal has tasks.
   const goalProgress = useGoalStore((s) => s.currentGoalProgress)
@@ -86,7 +102,11 @@ export function GoalDetailPage() {
   useEffect(() => {
     if (!id || toppedUpFor.current === id) return
     toppedUpFor.current = id
-    void topUpRoadmap(id)
+    // Swallow failures deliberately: this is a BEST-EFFORT background top-up the
+    // user never asked for, so a provider outage must not surface as an unhandled
+    // rejection (topUpRoadmap propagates AI errors, and nothing was awaiting it).
+    // The plan simply stays as-is until the next open.
+    void topUpRoadmap(id).catch(() => {})
   }, [id, topUpRoadmap])
 
   if (isLoading) {
@@ -111,6 +131,12 @@ export function GoalDetailPage() {
 
   const { goal, subgoals } = tree
 
+  // Flat id+title list of this goal's subgoals, for the dependency picker.
+  const subgoalRefs = subgoals.map((st) => ({
+    id: st.subgoal.id,
+    title: st.subgoal.title,
+  }))
+
   // The scope-cut escalation shows only when the goal is projected to miss a HARD
   // deadline: the date can't move, so rescheduling can't rescue it — the plan must
   // shrink. A soft deadline (or on-pace goal) never sees this.
@@ -124,12 +150,7 @@ export function GoalDetailPage() {
   const today = format(new Date(), 'yyyy-MM-dd')
   const overdueCount = subgoals
     .flatMap((st) => [...st.looseTasks, ...st.milestones.flatMap((m) => m.tasks)])
-    .filter(
-      (t) =>
-        t.scheduledDate !== undefined &&
-        t.scheduledDate < today &&
-        t.status !== 'completed',
-    ).length
+    .filter((t) => isOverdue(t, today)).length
 
   // Move this goal's missed tasks forward onto upcoming working days (capacity- and
   // deadline-aware in the store). The store refreshes the tree, so overdueCount
@@ -319,6 +340,21 @@ export function GoalDetailPage() {
           "what am I really aiming at?" before "what do I do?". */}
       <StrategyBriefPanel goalId={goal.id} />
 
+      {/* An attached reference document (syllabus, job spec, training plan),
+          distilled once and folded into every generation for this goal. */}
+      <GoalDocumentPanel
+        key={`doc-${goal.id}`}
+        goalId={goal.id}
+        goalTitle={goal.title}
+        goalDescription={goal.description}
+      />
+
+      {/* The general adaptation path: describe what changed and the EXISTING plan
+          is reconciled against it (parts it invalidates are proposed for removal or
+          re-planning), with the change folded into the goal's direction so future
+          generations don't rebuild what was just removed. */}
+      <PlanRevisionPanel key={`rev-${goal.id}`} goalId={goal.id} />
+
       {/* Living "what I've learned" note — refines the goal on the way by feeding
           the user's evolving understanding into every AI generation. key resets
           the local editor state when navigating between goals. */}
@@ -407,6 +443,10 @@ export function GoalDetailPage() {
                 data={subgoalTree}
                 goalId={goal.id}
                 goalTitle={goal.title}
+                // The dependency panel's inputs: every sibling (for the picker and
+                // to resolve a supporter id to a title) and the loaded edge set.
+                allSubgoals={subgoalRefs}
+                subgoalEdges={subgoalEdges}
               />
             ))}
           </div>

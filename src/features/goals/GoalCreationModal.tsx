@@ -100,11 +100,18 @@ function GoalFormLoader({
   useEffect(() => {
     if (!isEdit || !goal) return
     let active = true
-    void fetchGoalContext(goal.id).then((ctx) => {
-      if (!active) return
-      setGoalContext(ctx)
-      setLoaded(true)
-    })
+    // On a failed read, still mark loaded: the form then opens with an empty
+    // intake rather than hanging on "Loading..." forever (and without an unhandled
+    // rejection). The user can re-enter the tailoring answers.
+    void fetchGoalContext(goal.id)
+      .then((ctx) => {
+        if (!active) return
+        setGoalContext(ctx)
+        setLoaded(true)
+      })
+      .catch(() => {
+        if (active) setLoaded(true)
+      })
     return () => {
       active = false
     }

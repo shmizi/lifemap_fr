@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import type {
+  Dependency,
   ID,
   MilestoneStatus,
   SubgoalTree,
@@ -34,7 +35,9 @@ import { DailyPlanModal } from '@/features/goals/DailyPlanModal'
 import { TaskCreationModal } from '@/features/goals/TaskCreationModal'
 import { SubgoalCreationModal } from '@/features/goals/SubgoalCreationModal'
 import { TaskRow } from '@/features/goals/TaskRow'
+import { SubgoalDependencies } from '@/features/goals/SubgoalDependencies'
 import { partitionScheduledAndBacklog } from '@/engine/planning/partitionTasks'
+import { isSubgoalWorkDone } from '@/engine/progress/isSubgoalWorkDone'
 
 interface SubgoalSectionProps {
   data: SubgoalTree
@@ -44,15 +47,28 @@ interface SubgoalSectionProps {
   // The parent goal's title — context the AI milestone suggester needs (the
   // subgoal alone is ambiguous without the goal it serves). Passed from the page.
   goalTitle: string
+  // Every subgoal in this goal (id + title), for the "Depends on" picker. Loaded
+  // once by the page rather than per-section.
+  allSubgoals: { id: ID; title: string }[]
+  // The loaded SOFT subgoal dependency graph (all edges, not just this subgoal's —
+  // the panel filters to its own supporters by toId).
+  subgoalEdges: Dependency[]
 }
 
 export function SubgoalSection({
   data,
   goalId,
   goalTitle,
+  allSubgoals,
+  subgoalEdges,
 }: SubgoalSectionProps) {
   const { subgoal, milestones, looseTasks } = data
   const removeSubgoal = useGoalStore((s) => s.removeSubgoal)
+  const setSubgoalComplete = useGoalStore((s) => s.setSubgoalComplete)
+  const [isCompleting, setIsCompleting] = useState(false)
+  // Two-step only when open tasks would move: nothing surprising happens silently.
+  const [confirmComplete, setConfirmComplete] = useState(false)
+  const [completeError, setCompleteError] = useState<string | null>(null)
   // Engine-computed momentum for this subgoal (the store derives it from the
   // tree). Absent or task-less subgoals show no ring, keeping the header calm.
   const progress = useGoalStore((s) => s.subgoalProgress[subgoal.id])
@@ -112,6 +128,31 @@ export function SubgoalSection({
       setPendingCelebrations(new Set())
     }
     setExpanded((v) => !v)
+  }
+
+  const isCompleted = subgoal.status === 'completed'
+  const openDatedCount = [...looseTasks, ...milestones.flatMap((m) => m.tasks)].filter(
+    (t) => t.status !== 'completed' && t.scheduledDate !== undefined,
+  ).length
+  const workDone = isSubgoalWorkDone(data)
+
+  async function applyComplete(complete: boolean) {
+    setIsCompleting(true)
+    setCompleteError(null)
+    try {
+      await setSubgoalComplete(subgoal.id, complete)
+      setConfirmComplete(false)
+    } catch {
+      setCompleteError('Could not update this subgoal. Please try again.')
+    } finally {
+      setIsCompleting(false)
+    }
+  }
+
+  function handleCompleteClick() {
+    if (isCompleted) void applyComplete(false)
+    else if (openDatedCount > 0) setConfirmComplete(true)
+    else void applyComplete(true)
   }
 
   const milestoneCount = milestones.length
@@ -184,12 +225,55 @@ export function SubgoalSection({
           {SUBGOAL_STATUS_LABELS[subgoal.status]}
         </span>
 
+        <button
+          type="button"
+          onClick={handleCompleteClick}
+          disabled={isCompleting}
+          className="shrink-0 border border-app-border px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-app-text transition hover:bg-app-surface-alt disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-app-text/30"
+        >
+          {isCompleting ? 'Saving…' : isCompleted ? 'Reopen' : 'Mark complete'}
+        </button>
+
         <RowActions
           entityLabel="subgoal"
           onEdit={() => setIsEditOpen(true)}
           onDelete={() => removeSubgoal(subgoal.id)}
         />
       </div>
+
+      {confirmComplete ? (
+        <div className="flex flex-wrap items-center gap-3 border-t border-app-border px-4 py-2 text-xs text-app-text">
+          <span className="flex-1">
+            {openDatedCount} open task{openDatedCount === 1 ? '' : 's'} will move to
+            &ldquo;Later&rdquo; and leave your schedule. Nothing is deleted.
+          </span>
+          <button
+            type="button"
+            onClick={() => void applyComplete(true)}
+            disabled={isCompleting}
+            className="bg-app-text px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-app-surface transition hover:opacity-90 disabled:opacity-60"
+          >
+            Complete it
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirmComplete(false)}
+            disabled={isCompleting}
+            className="font-mono text-[10px] uppercase tracking-[0.12em] text-app-text-muted transition hover:text-app-text"
+          >
+            Cancel
+          </button>
+        </div>
+      ) : workDone && !isCompleted ? (
+        <p className="border-t border-app-border px-4 py-2 text-xs text-app-text-muted">
+          All the work here is done. Mark it complete?
+        </p>
+      ) : null}
+      {completeError ? (
+        <p className="border-t border-app-border px-4 py-2 text-xs text-red-600">
+          {completeError}
+        </p>
+      ) : null}
 
       {/* Collapsed peek: the nearest-due open task stays in view so you can act on
           it (or tick it off) without expanding the whole subgoal. */}
@@ -221,6 +305,7 @@ export function SubgoalSection({
                 milestoneTree.milestone.id === nextPhaseId &&
                 milestoneTree.tasks.length === 0
               }
+              nextTaskId={nextTask?.id}
             />
           ))}
 
@@ -232,7 +317,11 @@ export function SubgoalSection({
                 </p>
               ) : null}
               {scheduledLooseTasks.map((task) => (
-                <TaskRow key={task.id} task={task} />
+                <TaskRow
+                  key={task.id}
+                  task={task}
+                  isNext={task.id === nextTask?.id}
+                />
               ))}
             </div>
           ) : null}
@@ -294,6 +383,18 @@ export function SubgoalSection({
               </button>
             ) : null}
           </div>
+
+          {/* The SOFT "Depends on" links — which sibling subgoals strengthen this
+              one. Informational only (never blocks starting or finishing work), and
+              it renders nothing when there is no sibling to link to. This is the one
+              place edges are created, so it is what feeds the lagging-foundation
+              note, the priority dependency boost, and the weekly review's
+              strengthened-foundations line. */}
+          <SubgoalDependencies
+            subgoalId={subgoal.id}
+            allSubgoals={allSubgoals}
+            edges={subgoalEdges}
+          />
         </div>
       ) : null}
 

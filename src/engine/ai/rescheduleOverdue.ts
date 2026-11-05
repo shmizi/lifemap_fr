@@ -25,6 +25,10 @@ export interface RescheduleItem {
   id: ID
   // The task's estimated minutes (the caller applies a default for tasks with none).
   minutes: number
+  // Earliest day this item may land. A rebalance sets it to the task's current date
+  // so relieving an overloaded day only ever pushes work later: it never pulls a task
+  // planned for next month into a gap this week.
+  notBefore?: ISODate
 }
 
 export interface RescheduledItem {
@@ -43,6 +47,15 @@ export interface RescheduleOptions {
   // Latest date work may occupy — a HARD deadline's target. null/undefined leaves
   // it unbounded (a soft deadline). Overflow past it is compressed, never moved past.
   maxDate?: ISODate | null
+  // Minutes ALREADY committed on each upcoming day by work this reschedule is not
+  // touching — chiefly other goals' tasks (see engine/planning/committedMinutes).
+  // A day begins already this full, so recovered work lands in the gaps the
+  // calendar actually has instead of being stacked onto days that are already
+  // spoken for. Absent/empty ⇒ unchanged behaviour (an empty calendar).
+  //
+  // The caller MUST exclude the items being moved from this map, or their current
+  // dates would count against the very days they are being moved onto.
+  committedMinutesByDay?: Record<ISODate, number>
 }
 
 // Re-place overdue items onto upcoming working days at capacity. Order is preserved
@@ -57,6 +70,8 @@ export function rescheduleOverdue(
       ? new Set(opts.skipWeekdays)
       : new Set<number>()
   const budget = Math.max(1, opts.dailyBudgetMinutes)
+  // Bound on the forward scan for a free day (see the placement loop below).
+  const MAX_SCAN_DAYS = 365
 
   const nextWorkday = (d: Date): Date => {
     let c = d
@@ -80,18 +95,45 @@ export function rescheduleOverdue(
     last = differenceInCalendarDays(candidate, floor) < 0 ? floor : candidate
   }
 
+  // A day starts already occupied by whatever else the calendar holds that day.
+  const committed = opts.committedMinutesByDay ?? {}
+  const committedOn = (d: Date): number => committed[format(d, DATE_KEY)] ?? 0
+
   let cursor = floor
-  let usedToday = 0
+  let usedToday = committedOn(cursor)
   const out: RescheduledItem[] = []
   for (const item of items) {
-    // Day full? Try the next working day — unless that would cross a hard deadline,
-    // in which case stay put and compress the rest onto this (last allowed) day.
-    if (usedToday > 0 && usedToday + item.minutes > budget) {
-      const advanced = nextWorkday(addDays(cursor, 1))
-      if (!last || differenceInCalendarDays(advanced, last) <= 0) {
-        cursor = advanced
-        usedToday = 0
+    if (item.notBefore) {
+      let earliest = nextWorkday(parseISO(item.notBefore))
+      if (last && differenceInCalendarDays(earliest, last) > 0) earliest = last
+      if (differenceInCalendarDays(earliest, cursor) > 0) {
+        cursor = earliest
+        usedToday = committedOn(cursor)
       }
+    }
+    // Day full? Walk forward to the first working day that can hold this item —
+    // unless that would cross a hard deadline, in which case stay put and compress
+    // the rest onto this (last allowed) day. Scanning in a LOOP rather than a
+    // single step matters once committedMinutesByDay is supplied: several
+    // consecutive days can already be full, and a one-step advance would drop the
+    // item onto the next full day anyway.
+    //
+    // `usedToday > 0` keeps the existing guarantee that an item larger than the
+    // whole budget still lands on an otherwise-empty day rather than looping
+    // forever. MAX_SCAN_DAYS bounds the walk on a calendar that is full for a very
+    // long stretch — past it the item lands regardless, since overflowing a day
+    // beats dropping the work.
+    let scanned = 0
+    while (
+      usedToday > 0 &&
+      usedToday + item.minutes > budget &&
+      scanned < MAX_SCAN_DAYS
+    ) {
+      const advanced = nextWorkday(addDays(cursor, 1))
+      if (last && differenceInCalendarDays(advanced, last) > 0) break
+      cursor = advanced
+      usedToday = committedOn(cursor)
+      scanned += 1
     }
     out.push({ id: item.id, scheduledDate: format(cursor, DATE_KEY) })
     usedToday += item.minutes

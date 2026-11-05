@@ -35,6 +35,10 @@ interface MilestoneCardProps {
   // the first not-yet-completed milestone that still has no tasks. Surfaced as
   // "up next" with an emphasised plan CTA so finishing a phase reveals the next.
   isNextPhase?: boolean
+  // Id of the soonest still-open task across the WHOLE parent subgoal. Passed
+  // through so whichever phase happens to hold it marks that row; the decision is
+  // the subgoal's to make, since "next" is only meaningful across all its phases.
+  nextTaskId?: ID
 }
 
 export function MilestoneCard({
@@ -42,6 +46,7 @@ export function MilestoneCard({
   goalId,
   celebrateOnAppear = false,
   isNextPhase = false,
+  nextTaskId,
 }: MilestoneCardProps) {
   const { milestone, tasks } = data
   const removeMilestone = useGoalStore((s) => s.removeMilestone)
@@ -127,7 +132,7 @@ export function MilestoneCard({
       {tasks.length > 0 ? (
         <div className="mt-2 space-y-1">
           {tasks.map((task) => (
-            <TaskRow key={task.id} task={task} />
+            <TaskRow key={task.id} task={task} isNext={task.id === nextTaskId} />
           ))}
         </div>
       ) : (

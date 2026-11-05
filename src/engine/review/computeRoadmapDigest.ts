@@ -19,6 +19,7 @@
 
 import { format, parseISO, subDays } from 'date-fns'
 import type { GoalTree, ISODate, Task } from '@/core/types'
+import { isOverdue } from '@/engine/planning/isOverdue'
 
 // A 2-week window: today and the 13 days before it (matches computeWeeklyReview's
 // "rolling window that includes today", just wider).
@@ -97,8 +98,7 @@ export function computeRoadmapDigest(tree: GoalTree, now: Date): RoadmapDigest {
     (t) =>
       t.scheduledDate !== undefined &&
       inWindow(t.scheduledDate) &&
-      t.scheduledDate < today &&
-      t.status !== 'completed',
+      isOverdue(t, today),
   ).length
 
   return {

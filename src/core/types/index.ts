@@ -253,8 +253,31 @@ export interface GoalContext {
   // absent until it has been generated. Stored on this same per-goal row (no new
   // table, no index) so a goal's intake and its strategy live together.
   strategyBrief?: StrategyBrief;
+  // A reference document the user attached (syllabus, job spec, training plan).
+  // Stored DISTILLED, never raw — see SourceDocument. Same row as the rest of the
+  // intake, following the strategyBrief precedent.
+  sourceDocument?: SourceDocument;
   createdAt: ISODate;
   updatedAt: ISODate;
+}
+
+// A user-supplied document, reduced to something a prompt can afford to carry.
+//
+// WHY ONLY THE SUMMARY IS KEPT: the goal's context is rendered into EVERY AI call —
+// brief, structure, subgoals, milestones, every rolling daily plan and top-up. A
+// raw 40-page syllabus on that path would multiply the cost of every generation
+// forever, and the roadmap digest was deliberately built bounded so rolling calls
+// stay flat-cost. So the document is distilled ONCE on upload and only the distillate
+// is persisted; the original text is never stored and never re-sent.
+export interface SourceDocument {
+  // Original filename, shown so the user knows what is attached.
+  name: string;
+  // The distillate: the constraints, requirements, dates and topics worth planning
+  // around. This is what reaches the prompts.
+  summary: string;
+  // Size of the ORIGINAL text, so the UI can show what was condensed.
+  originalChars: number;
+  addedAt: ISODate;
 }
 
 // ─── View-model tree types (Phase 1, Session 5) ──────────────────────────────

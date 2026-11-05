@@ -200,38 +200,3 @@
             animation: lm-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) backwards; }
 .lm-pulse { transform-box: fill-box; transform-origin: center;
             animation: lm-pulse 2.3s ease-out infinite; }
-
-/* ── Dashboard "Total realization" figure — sliding ink SWEEP on change ───────
-   When a task is ticked the figure recomputes; an ink panel SLIDES in from the
-   left, stamps the number inverted (paper-on-ink, max contrast), holds a beat,
-   then glides off and fades. It's a ::before behind the glyphs (isolate + negative
-   z-index) sized a touch BIGGER than the number, and runs slow (1.3s) so the
-   change is felt. Theme-aware via --color-* (inverts correctly in dark mode too).
-   Reduced-motion users skip the motion via the global override; the animation is
-   re-fired by remounting the span (changing key). */
-@keyframes realization-sweep {
-  0%   { transform: translateX(-135%); opacity: 1; }
-  32%  { transform: translateX(0);     opacity: 1; }
-  60%  { transform: translateX(0);     opacity: 1; }
-  100% { transform: translateX(16%);   opacity: 0; }
-}
-@keyframes realization-ink {
-  0%,  26% { color: var(--color-text); }
-  34%, 60% { color: var(--color-surface); }
-  100%     { color: var(--color-text); }
-}
-.animate-realization-flash {
-  position: relative;
-  isolation: isolate;
-  animation: realization-ink 1.3s cubic-bezier(0.22, 0.61, 0.36, 1);
-}
-.animate-realization-flash::before {
-  content: '';
-  position: absolute;
-  inset: -0.16em -0.22em;
-  z-index: -1;
-  border-radius: 0.12em;
-  background: var(--color-text);
-  opacity: 0; /* resting: invisible — the sweep animation drives it */
-  animation: realization-sweep 1.3s cubic-bezier(0.22, 0.61, 0.36, 1);
-}

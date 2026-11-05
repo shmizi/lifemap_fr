@@ -30,6 +30,9 @@ export const WeeklyReviewPage = lazy(() =>
     default: m.WeeklyReviewPage,
   })),
 )
+export const RoadmapPage = lazy(() =>
+  import('@/pages/RoadmapPage').then((m) => ({ default: m.RoadmapPage })),
+)
 export const DiscoveryPage = lazy(() =>
   import('@/pages/DiscoveryPage').then((m) => ({ default: m.DiscoveryPage })),
 )

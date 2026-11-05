@@ -119,6 +119,13 @@ export interface AIGoalContext {
   // The user's living "what I've learned" note on this goal — constraints and
   // direction that emerged while working it, so generation adapts as they learn.
   learnings?: string
+  // The DISTILLED summary of a reference document the user attached (syllabus, job
+  // spec, training plan) — see core/types SourceDocument. Already condensed at
+  // upload, so carrying it on every generation stays cheap; the raw document is
+  // never stored and never sent again.
+  documentSummary?: string
+  // The document's filename, so a prompt can name its source ("per CS229-syllabus.md").
+  documentName?: string
 }
 
 // ── Feature: milestone suggestions ───────────────────────────────────────────
@@ -423,6 +430,61 @@ export interface ScopeCutContext {
   goalCategory: string
   targetDate?: ISODate
   behindSummary: string
+  userContext?: AIUserContext
+  goalContext?: AIGoalContext
+  strategyBrief?: StrategyBrief
+  digest?: RoadmapDigest
+}
+
+// ── Feature: plan revision ("something changed") ─────────────────────────────
+// A roadmap is generated from what was true when it was made. Weeks later the
+// situation has moved — a job started, a course changed, a tool was swapped, an
+// exam moved — and parts of the plan are no longer work worth doing. The existing
+// adaptation paths don't cover this: `learnings` only steers FUTURE generations,
+// the phase check-in only fires at a phase boundary and only updates the brief, and
+// the scope cut only fires when a HARD deadline is at risk. None of them can say
+// "that whole track is moot now".
+//
+// So this is the general case: the user describes what changed, and the coach says
+// which parts of the CURRENT plan the change invalidates. Same propose → review →
+// apply contract as the scope cut, because the user must approve anything
+// destructive.
+
+// What to do with a part of the plan the change affects.
+//   drop   — no longer worth doing at all; remove it (and its tasks).
+//   defer  — still worth doing, but not now; unschedule to the undated backlog.
+//   replan — still worth doing, but the WORK is now wrong (the how changed, not the
+//            what). Clears its incomplete dated tasks so the phase can be expanded
+//            again from the revised direction. This is the action the other flows
+//            had no way to express.
+export type PlanRevisionAction = 'drop' | 'defer' | 'replan'
+
+export interface PlanRevisionSuggestion {
+  // The track or phase affected, named so the user recognises it. Resolved to a
+  // real subgoal/milestone by resolveScopeCutTarget (title matching, never ids).
+  target: string
+  action: PlanRevisionAction
+  // Why the change makes this necessary — shown to the user, who is approving a
+  // destructive edit and deserves the reasoning.
+  rationale: string
+}
+
+export interface PlanRevisionProposal {
+  // How the plan should read differently now, in a sentence or two.
+  summary: string
+  suggestions: PlanRevisionSuggestion[]
+}
+
+// What the plan-revision builder needs. `changeNote` is the user's own description
+// of what changed — the only genuinely new input; everything else is the standard
+// context bundle the store assembles so the builder stays pure.
+export interface PlanRevisionContext {
+  goalId: ID
+  goalTitle: string
+  goalDescription: string
+  goalCategory: string
+  targetDate?: ISODate
+  changeNote: string
   userContext?: AIUserContext
   goalContext?: AIGoalContext
   strategyBrief?: StrategyBrief

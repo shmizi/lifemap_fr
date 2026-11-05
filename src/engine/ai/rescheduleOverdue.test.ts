@@ -99,3 +99,82 @@ describe('rescheduleOverdue', () => {
     ])
   })
 })
+
+// ── Cross-goal capacity (committedMinutesByDay) ──────────────────────────────
+// The overcommitment fix: a reschedule must place recovered work into the gaps the
+// calendar actually has, not stack it onto days other goals already filled.
+describe('rescheduleOverdue — existing calendar load', () => {
+  const from = new Date(2026, 7, 10) // Mon 10 Aug 2026, local
+
+  it('skips a day another goal has already filled', () => {
+    const out = rescheduleOverdue([{ id: 't1', minutes: 60 }], {
+      from,
+      dailyBudgetMinutes: 120,
+      committedMinutesByDay: { '2026-08-10': 120 },
+    })
+    // Monday is full, so the task lands Tuesday.
+    expect(out).toEqual([{ id: 't1', scheduledDate: '2026-08-11' }])
+  })
+
+  it('fills only a partially-committed day up to the remaining budget', () => {
+    const out = rescheduleOverdue(
+      [
+        { id: 't1', minutes: 30 },
+        { id: 't2', minutes: 30 },
+      ],
+      {
+        from,
+        dailyBudgetMinutes: 120,
+        committedMinutesByDay: { '2026-08-10': 90 },
+      },
+    )
+    // 90 committed + 30 fits exactly; the second spills to the next day.
+    expect(out).toEqual([
+      { id: 't1', scheduledDate: '2026-08-10' },
+      { id: 't2', scheduledDate: '2026-08-11' },
+    ])
+  })
+
+  it('walks past SEVERAL consecutive full days, not just one', () => {
+    const out = rescheduleOverdue([{ id: 't1', minutes: 60 }], {
+      from,
+      dailyBudgetMinutes: 120,
+      committedMinutesByDay: {
+        '2026-08-10': 120,
+        '2026-08-11': 120,
+        '2026-08-12': 120,
+      },
+    })
+    expect(out).toEqual([{ id: 't1', scheduledDate: '2026-08-13' }])
+  })
+
+  it('still compresses onto the deadline rather than moving past it', () => {
+    const out = rescheduleOverdue(
+      [
+        { id: 't1', minutes: 60 },
+        { id: 't2', minutes: 60 },
+      ],
+      {
+        from,
+        dailyBudgetMinutes: 60,
+        maxDate: '2026-08-11',
+        committedMinutesByDay: { '2026-08-10': 60, '2026-08-11': 60 },
+      },
+    )
+    // Both days are already full and the hard deadline is Tuesday, so the work
+    // compresses onto it instead of slipping past.
+    expect(out.every((r) => r.scheduledDate <= '2026-08-11')).toBe(true)
+  })
+
+  it('is unchanged when no calendar load is supplied', () => {
+    const opts = { from, dailyBudgetMinutes: 120 }
+    const items = [
+      { id: 't1', minutes: 60 },
+      { id: 't2', minutes: 60 },
+      { id: 't3', minutes: 60 },
+    ]
+    expect(rescheduleOverdue(items, opts)).toEqual(
+      rescheduleOverdue(items, { ...opts, committedMinutesByDay: {} }),
+    )
+  })
+})

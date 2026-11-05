@@ -171,3 +171,102 @@ describe('computePlanWindow', () => {
     expect(computePlanWindow(today, null, '2026-06-20', 14).days).toBe(0)
   })
 })
+
+// ── Cross-goal capacity ──────────────────────────────────────────────────────
+// One session per working day is still the rule; capacity only decides WHICH days
+// are eligible, so a new goal's plan slots into days other goals left free.
+describe('scheduleDailyTasks — existing calendar load', () => {
+  const start = new Date(2026, 7, 10) // Mon 10 Aug 2026, local
+
+  it('skips days already at budget from other goals', () => {
+    const out = scheduleDailyTasks(
+      [{ title: 'A' }, { title: 'B' }],
+      start,
+      30,
+      [],
+      {
+        dailyBudgetMinutes: 120,
+        committedMinutesByDay: { '2026-08-10': 120, '2026-08-11': 120 },
+      },
+    )
+    expect(out.map((t) => t.scheduledDate)).toEqual(['2026-08-12', '2026-08-13'])
+  })
+
+  it('uses a day that still has room left', () => {
+    const out = scheduleDailyTasks([{ title: 'A' }], start, 30, [], {
+      dailyBudgetMinutes: 120,
+      committedMinutesByDay: { '2026-08-10': 90 },
+    })
+    expect(out[0].scheduledDate).toBe('2026-08-10')
+  })
+
+  it('respects days off while skipping full days', () => {
+    // Sat(6)/Sun(0) off, and Mon+Tue already full -> first free workday is Wed.
+    const out = scheduleDailyTasks([{ title: 'A' }], start, 30, [0, 6], {
+      dailyBudgetMinutes: 120,
+      committedMinutesByDay: { '2026-08-10': 120, '2026-08-11': 120 },
+    })
+    expect(out[0].scheduledDate).toBe('2026-08-12')
+  })
+
+  it('is unchanged when no capacity is supplied', () => {
+    const sessions = [{ title: 'A' }, { title: 'B' }]
+    expect(scheduleDailyTasks(sessions, start, 30)).toEqual(
+      scheduleDailyTasks(sessions, start, 30, [], {
+        dailyBudgetMinutes: 120,
+        committedMinutesByDay: {},
+      }),
+    )
+  })
+})
+
+describe('capacity: a session must actually fit its day', () => {
+  const start = new Date(2026, 7, 10) // Mon 10 Aug 2026, local
+
+  it('skips a part-full day that cannot hold the session', () => {
+    const out = scheduleDailyTasks([{ title: 'A', minutes: 60 }], start, 30, [], {
+      dailyBudgetMinutes: 240,
+      committedMinutesByDay: { '2026-08-10': 200 },
+    })
+    expect(out[0].scheduledDate).toBe('2026-08-11')
+  })
+
+  it('still lands an over-budget session on an empty day', () => {
+    const out = scheduleDailyTasks([{ title: 'A', minutes: 300 }], start, 30, [], {
+      dailyBudgetMinutes: 240,
+      committedMinutesByDay: {},
+    })
+    expect(out[0].scheduledDate).toBe('2026-08-10')
+  })
+
+  it('skips habit occurrences that do not fit, keeping the cadence', () => {
+    const out = expandRecurringSessions(
+      [{ title: 'H', minutes: 60, recurrence: { everyDays: 1 } }],
+      {
+        startDate: start,
+        windowDays: 3,
+        defaultMinutes: 30,
+        capacity: {
+          dailyBudgetMinutes: 240,
+          committedMinutesByDay: { '2026-08-11': 200 },
+        },
+      },
+    )
+    expect(out.map((t) => t.scheduledDate)).toEqual(['2026-08-10', '2026-08-12'])
+  })
+
+  it('counts habits against each other within one call', () => {
+    const habit = (title: string) => ({
+      title,
+      minutes: 150,
+      recurrence: { everyDays: 1 },
+    })
+    const out = expandRecurringSessions([habit('A'), habit('B')], {
+      startDate: start,
+      windowDays: 1,
+      defaultMinutes: 30,
+      capacity: { dailyBudgetMinutes: 240, committedMinutesByDay: {} },
+    })
+    expect(out.map((t) => t.title)).toEqual(['A'])
+  })
+})

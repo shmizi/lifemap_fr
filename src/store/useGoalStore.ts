@@ -26,6 +26,7 @@ import type {
   StrategyBrief,
   SlipReason,
   ID,
+  ISODate,
 } from '@/core/types'
 import { computeEffortMomentum } from '@/engine/progress/computeEffortMomentum'
 import type { Completion } from '@/engine/progress/computeCompletion'
@@ -62,6 +63,13 @@ import {
 import { isMilestoneComplete } from '@/engine/progress/isMilestoneComplete'
 import { rankTasks, DEFAULT_TOP_N } from '@/engine/priority/rankTasks'
 import { partitionScheduledAndBacklog } from '@/engine/planning/partitionTasks'
+import { isOverdue } from '@/engine/planning/isOverdue'
+import {
+  computeCommittedMinutesByDay,
+  findOvercommittedDays,
+  mergeCommittedMinutes,
+  type CommittedByDay,
+} from '@/engine/planning/committedMinutes'
 import { findDuplicateTaskIds } from '@/engine/planning/dedupeTasks'
 import { computeActiveSupportCounts } from '@/engine/priority/dependencyBoost'
 import { buildRoadmap } from '@/engine/roadmap/buildRoadmap'
@@ -89,6 +97,8 @@ import { buildStructurePrompt } from '@/engine/ai/prompts/structure'
 import { parseStructure } from '@/engine/ai/parsers/structure'
 import { buildScopeCutPrompt } from '@/engine/ai/prompts/scopeCut'
 import { parseScopeCut } from '@/engine/ai/parsers/scopeCut'
+import { buildPlanRevisionPrompt } from '@/engine/ai/prompts/planRevision'
+import { parsePlanRevision } from '@/engine/ai/parsers/planRevision'
 import { resolveScopeCutTarget } from '@/engine/planning/resolveScopeCutTarget'
 import {
   buildIntakePrompt,
@@ -121,6 +131,8 @@ import type {
   PlannedTrack,
   ScopeCutProposal,
   ScopeCutSuggestion,
+  PlanRevisionProposal,
+  PlanRevisionSuggestion,
 } from '@/engine/ai/types'
 import { aiProvider } from '@/services/ai'
 import {
@@ -132,6 +144,7 @@ import {
   DEFAULT_MILESTONE_STATUS,
   DEFAULT_TASK_STATUS,
   DEFAULT_TASK_PRIORITY,
+  DEFAULT_USER_PROFILE,
   LIFE_SITUATION_OPTIONS,
   TIME_OF_DAY_OPTIONS,
   WORK_RHYTHM_OPTIONS,
@@ -277,6 +290,22 @@ export interface ScopeCutApplyResult {
   unmatched: string[]
 }
 
+// Outcome of applyPlanRevision — how many approved revisions took effect, by kind,
+// plus the targets that couldn't be matched to a track or phase (surfaced so the
+// user knows what to handle by hand). `replanned` counts phases whose stale dated
+// work was cleared: they keep their place in the structure and can be expanded
+// again from the revised direction, which is the point of that action.
+export interface PlanRevisionApplyResult {
+  dropped: number
+  deferred: number
+  replanned: number
+  unmatched: string[]
+  // Whether the change note also made it into the goal's Strategy Brief. False when
+  // the brief regeneration failed — the plan edits still landed, and the UI says so
+  // rather than pretending the direction moved too.
+  directionUpdated: boolean
+}
+
 // Plain-language statement of how far a goal is projected to miss its deadline — the
 // `behindSummary` the scope-cut prompt frames its ask around, derived from the pure
 // projection. Falls back to a generic line when the pace isn't projectable yet (the
@@ -405,6 +434,9 @@ const loadAIGoalContext = async (
     deadlineHardness: ctx.deadlineHardness,
     motivation: ctx.motivation,
     learnings: ctx.learnings,
+    // Only the distillate reaches the prompt — the raw document was never stored.
+    documentSummary: ctx.sourceDocument?.summary,
+    documentName: ctx.sourceDocument?.name,
   }
 }
 
@@ -458,8 +490,40 @@ interface GoalState {
   // boosted task. Keyed by subgoalId because the count is a property of the
   // subgoal, shared by all its tasks.
   subgoalSupportCounts: Record<ID, number>
+  // ── Daily capacity (cross-goal) ────────────────────────────────────────────
+  // The user's daily budget in minutes, and the upcoming days whose scheduled work
+  // EXCEEDS it. Recomputed on every dashboard refresh from every goal's tasks.
+  //
+  // Generation now places work against the shared budget, so a freshly planned goal
+  // can't overfill a day. This pair covers what generation can't: a calendar that
+  // is ALREADY overcommitted — from plans made before the fix, from tasks the user
+  // moved by hand, or from lowering availableHoursPerDay after the fact. Empty when
+  // the plan fits.
+  dailyBudgetMinutes: number
+  overcommittedDays: Array<{ day: ISODate; minutes: number }>
   isLoadingDashboard: boolean
   loadDashboard: () => Promise<void>
+
+  // Re-spread an over-capacity stretch of the calendar so no day exceeds the daily
+  // budget. Targeted, not a wholesale re-plan: only tasks from the FIRST
+  // overcommitted day onward are re-placed, in their existing order, so work the
+  // user has already sequenced keeps its shape and nothing before the problem
+  // moves. Returns how many tasks changed date (0 when the plan already fits).
+  //
+  // Deliberately does NOT bump rescheduleCount or log slip events — those record a
+  // USER missing their own plan, and Reliability must not be dented because the
+  // system rebalanced its own overcommitment.
+  rebalanceSchedule: () => Promise<number>
+
+  // Recompute everything derived from the SUBGOAL DEPENDENCY GRAPH, in place (no
+  // loading flash). The edge set lives in useDependencyStore, which owns the
+  // add/remove writes — but two cached values here are derived from it and would
+  // otherwise sit stale until the next full load: each goal's `laggingFoundation`
+  // note (goalHealth) and `subgoalSupportCounts` (which also feeds the priority
+  // ranking's dependencyBoost). useDependencyStore calls this after a successful
+  // edge mutation, the same one-way cross-store call useDiscoveryStore.addToPlan
+  // already makes into this store. Best-effort: it never throws.
+  refreshDependencySignals: () => Promise<void>
 
   // --- selection ---
   selectedGoalId: ID | null
@@ -501,6 +565,11 @@ interface GoalState {
   addSubgoal: (input: NewSubgoalInput) => Promise<Subgoal>
   editSubgoal: (id: ID, changes: SubgoalChanges) => Promise<void>
   removeSubgoal: (id: ID) => Promise<void>
+  // Mark a subgoal done, or reopen it. The user's call, never automatic (see
+  // engine/progress/isSubgoalWorkDone). Completing moves its open tasks to the undated
+  // "Later" backlog: kept, but off the dashboard, the overdue list and the daily
+  // budget. Reopening does not restore their dates. Returns how many tasks moved.
+  setSubgoalComplete: (id: ID, complete: boolean) => Promise<number>
 
   addMilestone: (input: NewMilestoneInput) => Promise<Milestone>
   editMilestone: (id: ID, changes: MilestoneChanges) => Promise<void>
@@ -704,6 +773,31 @@ interface GoalState {
     suggestions: ScopeCutSuggestion[],
   ) => Promise<ScopeCutApplyResult>
 
+  // ── Plan revision ("something changed") ────────────────────────────────────
+  // The general adaptation path. A roadmap encodes what was true when it was made;
+  // weeks later parts of it can simply be the wrong work. Nothing else covers that:
+  // `learnings` only steers FUTURE generations, the phase check-in only fires at a
+  // phase boundary and only touches the brief, and the scope cut only fires when a
+  // HARD deadline is at risk. This takes the user's description of what changed and
+  // reconciles the EXISTING plan against it.
+  //
+  // READ-ONLY, like every other proposal action: it writes nothing and returns the
+  // proposal for the user to approve. Returns null on a gone goal, an empty note, or
+  // a malformed reply. Propagates provider errors (the panel shows them inline).
+  generatePlanRevisionProposal: (
+    goalId: ID,
+    changeNote: string,
+  ) => Promise<PlanRevisionProposal | null>
+
+  // Enact the approved revisions AND fold the change into the goal's Direction, so
+  // the plan and the brief that generates future plans move together — applying one
+  // without the other is what would make the same stale work regenerate next time.
+  applyPlanRevision: (
+    goalId: ID,
+    changeNote: string,
+    suggestions: PlanRevisionSuggestion[],
+  ) => Promise<PlanRevisionApplyResult>
+
   // --- cross-cutting error state ---
   // A single, calm, NON-FATAL message set when a background load or post-write
   // refresh fails (e.g. an IndexedDB read rejects). Null when all is well. The
@@ -783,6 +877,37 @@ export const useGoalStore = create<GoalState>()((set, get) => {
     return computeSlipInsights(events, new Date())
   }
 
+  // ── Cross-goal daily capacity ───────────────────────────────────────────────
+  // The user's daily budget PLUS what every goal has already put on the calendar.
+  //
+  // This is the fix for the app's worst planning bug: availableHoursPerDay was
+  // being applied per GENERATION, not per DAY. Each goal's roadmap was packed
+  // against an empty calendar, so N goals produced N plans that each filled the
+  // whole day — an N-times overcommitment the user discovered days later as a pile
+  // of impossible "missed" tasks. Every scheduling call now places work against
+  // this map, so the budget is shared across goals the way the user experiences it.
+  //
+  // Deliberately reads getAllTasks(): capacity is a whole-life property, so a
+  // goal-scoped read would reintroduce exactly the blindness being fixed. (Weekly
+  // Review already reads all tasks, so this is an established shape.)
+  //
+  // `excludeIds` drops the rows a caller is about to re-place, so a reschedule
+  // never counts a task's CURRENT date against the day it is being moved to.
+  const loadCapacity = async (
+    excludeIds?: ReadonlySet<ID>,
+  ): Promise<{ dailyBudgetMinutes: number; committedMinutesByDay: CommittedByDay }> => {
+    const [profile, allTasks] = await Promise.all([getProfile(), getAllTasks()])
+    return {
+      dailyBudgetMinutes:
+        (profile?.availableHoursPerDay ??
+          DEFAULT_USER_PROFILE.availableHoursPerDay) * 60,
+      committedMinutesByDay: computeCommittedMinutesByDay(allTasks, {
+        defaultMinutes: DEFAULT_DAILY_MINUTES,
+        excludeIds,
+      }),
+    }
+  }
+
   const refreshCurrentTree = async () => {
     const goalId = get().currentGoalTree?.goal.id
     if (goalId) {
@@ -840,12 +965,24 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       ...thisWeekTasks,
     ])
 
+    // Cross-goal capacity read: which upcoming days are over the daily budget. Runs
+    // in the same pass as the windows so the dashboard's nudge can never disagree
+    // with the lists beside it.
+    const { dailyBudgetMinutes, committedMinutesByDay } = await loadCapacity()
+
     set({
       overdueTasks,
       todaysTasks,
       thisWeekTasks,
       taskLineages,
       todayEffort: computeEffortMomentum(todaysTasks),
+      dailyBudgetMinutes,
+      // Past days can't be relieved by moving work forward, so only today onward
+      // is actionable — a day that is already behind is the reschedule flow's job.
+      overcommittedDays: findOvercommittedDays(
+        committedMinutesByDay,
+        dailyBudgetMinutes,
+      ).filter((d) => d.day >= today),
     })
   }
 
@@ -1071,6 +1208,85 @@ export const useGoalStore = create<GoalState>()((set, get) => {
   const nextOrder = (orders: number[]): number =>
     orders.length === 0 ? 0 : Math.max(...orders) + 1
 
+  // ── Batched writes ──────────────────────────────────────────────────────────
+  // The WRITE half of addTask, without its refreshes. The public addTask is this
+  // plus a full settle, which is right for a single user action — but a generation
+  // writes tens of tasks in a loop, and refreshing every surface per task meant a
+  // 30-task phase did ~90 refresh passes. Each of those re-reads the whole goal
+  // list, every goal's tasks, the dependency graph and (since capacity) every task
+  // again — negligible against Dexie, minutes of round-trips against Supabase.
+  //
+  // Batch callers use this and settle ONCE at the end. They still refresh the open
+  // tree per item so the page visibly fills in as the plan lands; it is the
+  // cross-goal work that is deferred, not the feedback.
+  const writeTask = async (input: NewTaskInput): Promise<Task> => {
+    const subgoalTasks = await getTasksBySubgoalId(input.subgoalId)
+    const groupOrders = subgoalTasks
+      .filter((t) => t.milestoneId === input.milestoneId)
+      .map((t) => t.order)
+    const task = await createTask({ ...input, order: nextOrder(groupOrders) })
+    // A new (pending) task under a completed milestone must re-open it.
+    if (input.milestoneId) await reconcileMilestone(input.milestoneId)
+    return task
+  }
+
+  const writeSubgoal = async (input: NewSubgoalInput): Promise<Subgoal> => {
+    const siblings = await getSubgoalsByGoalId(input.goalId)
+    return createSubgoal({ ...input, order: nextOrder(siblings.map((s) => s.order)) })
+  }
+
+  const writeMilestone = async (input: NewMilestoneInput): Promise<Milestone> => {
+    const siblings = await getMilestonesBySubgoalId(input.subgoalId)
+    return createMilestone({ ...input, order: nextOrder(siblings.map((m) => m.order)) })
+  }
+
+  // The full post-write settle every mutation ends with.
+  const settleAllSurfaces = (): Promise<void> =>
+    settleRefreshes([refreshCurrentTree(), refreshDashboard(), refreshCrossGoal()])
+
+  // Date a generated plan: habits first (they keep a fixed cadence, so they claim
+  // their days), then the one-time backbone into what those days have LEFT. Shared by
+  // the daily-plan and phase paths so both count habits against the daily budget.
+  const dateSessions = (
+    sessions: PlannedSession[],
+    window: { startDate: Date; days: number },
+    defaultMinutes: number,
+    lightDays: number[],
+    capacity: { dailyBudgetMinutes: number; committedMinutesByDay: CommittedByDay },
+  ): ScheduledDailyTask[] => {
+    const habits = expandRecurringSessions(
+      // Cap recurring habits: even if the model over-marks sessions recurring, only
+      // the first few survive, so one plan can't dump dozens of occurrences.
+      sessions.filter((s) => s.recurrence).slice(0, MAX_RECURRING_SESSIONS),
+      {
+        startDate: window.startDate,
+        windowDays: window.days,
+        defaultMinutes,
+        skipWeekdays: lightDays,
+        capacity,
+      },
+    )
+    const habitMinutes: CommittedByDay = {}
+    for (const h of habits) {
+      habitMinutes[h.scheduledDate] =
+        (habitMinutes[h.scheduledDate] ?? 0) + h.estimatedMinutes
+    }
+    const backbone = scheduleDailyTasks(
+      sessions.filter((s) => !s.recurrence),
+      window.startDate,
+      defaultMinutes,
+      lightDays,
+      {
+        dailyBudgetMinutes: capacity.dailyBudgetMinutes,
+        committedMinutesByDay: mergeCommittedMinutes(
+          capacity.committedMinutesByDay,
+          habitMinutes,
+        ),
+      },
+    )
+    return [...backbone, ...habits]
+  }
+
   // Run independent refreshers concurrently as BEST EFFORT. Three guarantees:
   //  1. One failing refresh never aborts the others (allSettled, not all) — so a
   //     single bad read can't leave MORE of the view stale than necessary.
@@ -1150,6 +1366,9 @@ export const useGoalStore = create<GoalState>()((set, get) => {
     todayEffort: { completed: 0, total: 0, percent: 0 },
     topPriorityTasks: [],
     subgoalSupportCounts: {},
+    dailyBudgetMinutes:
+      DEFAULT_USER_PROFILE.availableHoursPerDay * 60,
+    overcommittedDays: [],
     isLoadingDashboard: false,
 
     // Initial load of the dashboard (flips the loading flag for the first paint).
@@ -1168,6 +1387,90 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       } finally {
         set({ isLoadingDashboard: false })
       }
+    },
+
+    // See the interface note. refreshCrossGoal re-reads the edge set (it is not
+    // prefetched here) and recomputes both dependent caches from one shared fetch.
+    refreshDependencySignals: async () => {
+      await settleRefreshes([refreshCrossGoal()])
+    },
+
+    // Relieve an over-capacity calendar (see the interface note). Reuses the pure
+    // rescheduleOverdue engine: given items in the order they should be worked and
+    // a daily budget, it lays them onto working days at capacity — which is exactly
+    // a rebalance when the items are "everything from the first overloaded day on".
+    rebalanceSchedule: async () => {
+      const now = new Date()
+      const today = format(now, 'yyyy-MM-dd')
+
+      const [allTasks, userContext, capacity] = await Promise.all([
+        getAllTasks(),
+        getUserContext(),
+        loadCapacity(),
+      ])
+      const budget = capacity.dailyBudgetMinutes
+
+      // Only today onward can be relieved by moving work forward.
+      const over = findOvercommittedDays(
+        capacity.committedMinutesByDay,
+        budget,
+      ).filter((d) => d.day >= today)
+      if (over.length === 0) return 0
+      const from = over[0].day
+
+      // Everything scheduled on/after the first overloaded day, in the order it is
+      // currently meant to be worked. Days before it already fit and stay put.
+      const moving = allTasks
+        .filter(
+          (t) =>
+            t.scheduledDate !== undefined &&
+            t.scheduledDate >= from &&
+            t.status !== 'completed',
+        )
+        .sort(
+          (a, b) =>
+            (a.scheduledDate ?? '').localeCompare(b.scheduledDate ?? '') ||
+            a.order - b.order,
+        )
+      if (moving.length === 0) return 0
+
+      // Re-place them against the load they are NOT part of (i.e. the untouched
+      // earlier days), starting no earlier than today.
+      const movingIds = new Set(moving.map((t) => t.id))
+      const held = computeCommittedMinutesByDay(allTasks, {
+        defaultMinutes: DEFAULT_DAILY_MINUTES,
+        excludeIds: movingIds,
+      })
+      const spread = rescheduleOverdue(
+        moving.map((t) => ({
+          id: t.id,
+          minutes: t.estimatedMinutes ?? DEFAULT_DAILY_MINUTES,
+          // Relief only pushes work later; a later task never fills an earlier gap.
+          notBefore: t.scheduledDate,
+        })),
+        {
+          from: from > today ? parseISO(from) : now,
+          dailyBudgetMinutes: budget,
+          skipWeekdays: userContext?.lightDays ?? [],
+          // Unbounded: a rebalance is capacity-first. A goal whose HARD deadline
+          // can't absorb the spread is the scope-cut nudge's problem, not this one.
+          maxDate: null,
+          committedMinutesByDay: held,
+        },
+      )
+
+      // Write only genuine moves — an unchanged date is not a mutation, and
+      // skipping it keeps updatedAt honest.
+      const currentDate = new Map(moving.map((t) => [t.id, t.scheduledDate]))
+      let moved = 0
+      for (const r of spread) {
+        if (currentDate.get(r.id) === r.scheduledDate) continue
+        await updateTask(r.id, { scheduledDate: r.scheduledDate })
+        moved += 1
+      }
+
+      await settleAllSurfaces()
+      return moved
     },
 
     // --- selection ---
@@ -1236,9 +1539,7 @@ export const useGoalStore = create<GoalState>()((set, get) => {
 
     // --- subgoals ---
     addSubgoal: async (input) => {
-      const siblings = await getSubgoalsByGoalId(input.goalId)
-      const order = nextOrder(siblings.map((s) => s.order))
-      const subgoal = await createSubgoal({ ...input, order })
+      const subgoal = await writeSubgoal(input)
       await settleRefreshes([refreshCurrentTree()])
       return subgoal
     },
@@ -1258,11 +1559,27 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       await settleRefreshes([refreshCurrentTree(), refreshGoalsAndProgress()])
     },
 
+    // Refreshes every surface, not just the tree like editSubgoal: completion feeds
+    // the dependency support counts and the priority ranking, and unscheduling tasks
+    // changes the dashboard windows and the daily load.
+    setSubgoalComplete: async (id, complete) => {
+      await updateSubgoal(id, { status: complete ? 'completed' : DEFAULT_SUBGOAL_STATUS })
+      let moved = 0
+      if (complete) {
+        const tasks = await getTasksBySubgoalId(id)
+        for (const t of tasks) {
+          if (t.status === 'completed' || t.scheduledDate === undefined) continue
+          await updateTask(t.id, { scheduledDate: undefined })
+          moved += 1
+        }
+      }
+      await settleAllSurfaces()
+      return moved
+    },
+
     // --- milestones ---
     addMilestone: async (input) => {
-      const siblings = await getMilestonesBySubgoalId(input.subgoalId)
-      const order = nextOrder(siblings.map((m) => m.order))
-      const milestone = await createMilestone({ ...input, order })
+      const milestone = await writeMilestone(input)
       await settleRefreshes([refreshCurrentTree()])
       return milestone
     },
@@ -1279,26 +1596,15 @@ export const useGoalStore = create<GoalState>()((set, get) => {
 
     // --- tasks ---
     addTask: async (input) => {
-      // A task's order is scoped to its group: same milestoneId (including both
-      // undefined for loose tasks). Partition the subgoal's tasks accordingly.
-      const subgoalTasks = await getTasksBySubgoalId(input.subgoalId)
-      const groupOrders = subgoalTasks
-        .filter((t) => t.milestoneId === input.milestoneId)
-        .map((t) => t.order)
-      const order = nextOrder(groupOrders)
-      const task = await createTask({ ...input, order })
-      // A new (pending) task under a completed milestone must re-open it.
-      if (input.milestoneId) await reconcileMilestone(input.milestoneId)
+      // Order is scoped to the task's group (same milestoneId, both undefined for
+      // loose) — writeTask owns that, so a batched write orders identically.
+      const task = await writeTask(input)
       // Refresh every surface a task touches: the goal tree (Detail View), the
       // dashboard windows, and the cross-goal caches (priority list AND goals-list
       // progress/health). Best-effort — each refresher no-ops cheaply for a view
       // that isn't mounted, and one failing refresh must neither abort the others
       // nor reject this (already-saved) add.
-      await settleRefreshes([
-        refreshCurrentTree(),
-        refreshDashboard(),
-        refreshCrossGoal(),
-      ])
+      await settleAllSurfaces()
       return task
     },
     editTask: async (id, changes) => {
@@ -1332,11 +1638,7 @@ export const useGoalStore = create<GoalState>()((set, get) => {
         'milestoneId' in changes ? changes.milestoneId : before?.milestoneId
       if (newMilestoneId) affected.add(newMilestoneId)
       await Promise.all([...affected].map(reconcileMilestone))
-      await settleRefreshes([
-        refreshCurrentTree(),
-        refreshDashboard(),
-        refreshCrossGoal(),
-      ])
+      await settleAllSurfaces()
     },
     removeTask: async (id) => {
       // Removing a task can complete its milestone (if it was the last open
@@ -1344,11 +1646,7 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       const before = await getTaskById(id)
       await deleteTask(id)
       if (before?.milestoneId) await reconcileMilestone(before.milestoneId)
-      await settleRefreshes([
-        refreshCurrentTree(),
-        refreshDashboard(),
-        refreshCrossGoal(),
-      ])
+      await settleAllSurfaces()
     },
 
     // De-duplicate a goal's tasks: gather every task in a stable KEEP-PRIORITY order
@@ -1382,11 +1680,7 @@ export const useGoalStore = create<GoalState>()((set, get) => {
         if (t.milestoneId) affectedMilestones.add(t.milestoneId)
       }
       for (const mId of affectedMilestones) await reconcileMilestone(mId)
-      await settleRefreshes([
-        refreshCurrentTree(),
-        refreshDashboard(),
-        refreshCrossGoal(),
-      ])
+      await settleAllSurfaces()
       return removeIds.size
     },
 
@@ -1640,8 +1934,13 @@ export const useGoalStore = create<GoalState>()((set, get) => {
             return {
               ...nd,
               label: goal?.title ?? 'Goal',
+              // parseISO, NOT new Date(): a date-only 'YYYY-MM-DD' passed to the
+              // Date constructor is parsed as UTC midnight, which renders as the
+              // PREVIOUS day (and so possibly the previous month) west of UTC.
+              // parseISO reads it as local midnight — the same convention every
+              // other date-only read in the app uses.
               sublabel: goal?.targetDate
-                ? format(new Date(goal.targetDate), 'MMM yyyy')
+                ? format(parseISO(goal.targetDate), 'MMM yyyy')
                 : undefined,
               date: goal?.targetDate,
               state: done ? 'done' : pct > 0 ? 'active' : 'todo',
@@ -1660,8 +1959,9 @@ export const useGoalStore = create<GoalState>()((set, get) => {
           return {
             ...nd,
             label: sub?.title ?? 'Subgoal',
+            // parseISO for the same local-day reason as the city branch above.
             sublabel: sub?.targetDate
-              ? format(new Date(sub.targetDate), 'MMM yyyy')
+              ? format(parseISO(sub.targetDate), 'MMM yyyy')
               : undefined,
             date: sub?.targetDate,
             state,
@@ -1776,25 +2076,15 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       // (expandRecurringSessions). Both fall back to request.dailyMinutes for minutes.
       const sessions = parsePlannedSessions(response, days)
       const lightDays = rawContext?.lightDays ?? []
-      const backbone = scheduleDailyTasks(
-        sessions.filter((s) => !s.recurrence),
-        startDate,
+      // Place this plan against what EVERY goal already has on the calendar, so a
+      // second goal's daily practice doesn't land on days the first already filled.
+      return dateSessions(
+        sessions,
+        { startDate, days },
         request.dailyMinutes,
         lightDays,
+        await loadCapacity(),
       )
-      // Cap recurring habits: even if the model over-marks sessions recurring, keep
-      // only the first few so one plan can't dump dozens of daily occurrences
-      // (MAX_RECURRING_SESSIONS). Order preserved, so the earliest habits survive.
-      const habits = expandRecurringSessions(
-        sessions.filter((s) => s.recurrence).slice(0, MAX_RECURRING_SESSIONS),
-        {
-          startDate,
-          windowDays: days,
-          defaultMinutes: request.dailyMinutes,
-          skipWeekdays: lightDays,
-        },
-      )
-      return [...backbone, ...habits]
     },
 
     // --- strategy brief (read slot) ---
@@ -1910,9 +2200,12 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       if (tracks.length === 0) return
       const tree = await getGoalTree(goalId)
       if (!tree || tree.subgoals.length > 0) return
+      // Batched: write the whole skeleton, refreshing the open tree once per TRACK
+      // so the page fills in visibly, then settle every surface once at the end.
+      // Previously each subgoal and each phase re-read the tree individually.
       for (const track of tracks) {
         if (track.title.trim().length === 0) continue
-        const subgoal = await get().addSubgoal({
+        const subgoal = await writeSubgoal({
           goalId,
           title: track.title.trim(),
           description: track.description?.trim() ?? '',
@@ -1922,7 +2215,7 @@ export const useGoalStore = create<GoalState>()((set, get) => {
         })
         for (const phase of track.phases) {
           if (phase.title.trim().length === 0) continue
-          await get().addMilestone({
+          await writeMilestone({
             subgoalId: subgoal.id,
             title: phase.title.trim(),
             ...(phase.description?.trim()
@@ -1932,7 +2225,9 @@ export const useGoalStore = create<GoalState>()((set, get) => {
             aiSuggested: true,
           })
         }
+        await settleRefreshes([refreshCurrentTree()])
       }
+      await settleAllSurfaces()
     },
 
     // STRUCTURE — direct (one-click) path: propose then immediately write. Unchanged
@@ -2003,17 +2298,15 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       )
       const sessions = parsePlannedSessions(response, days)
       const lightDays = rawContext?.lightDays ?? []
-      const backbone = scheduleDailyTasks(
-        sessions.filter((s) => !s.recurrence),
-        startDate,
+      // Same cross-goal capacity rule as generateDailyPlan: a phase expands into
+      // the days that have room, not onto a calendar assumed empty.
+      return dateSessions(
+        sessions,
+        { startDate, days },
         dailyMinutes,
         lightDays,
+        await loadCapacity(),
       )
-      const habits = expandRecurringSessions(
-        sessions.filter((s) => s.recurrence).slice(0, MAX_RECURRING_SESSIONS),
-        { startDate, windowDays: days, defaultMinutes: dailyMinutes, skipWeekdays: lightDays },
-      )
-      return [...backbone, ...habits]
     },
 
     // Write APPROVED (possibly user-trimmed/edited) phase tasks UNDER the milestone
@@ -2025,10 +2318,13 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       if (tasks.length === 0) return 0
       const milestone = await getMilestoneById(milestoneId)
       if (!milestone) return 0
+      // Batched: ~2 weeks of tasks land as one write run, then ONE settle. Going
+      // through addTask here meant a 30-task phase triggered 30 full cross-goal
+      // refreshes — the dominant cost of accepting a plan on the cloud backend.
       let written = 0
       for (const t of tasks) {
         if (t.title.trim().length === 0) continue
-        await get().addTask({
+        await writeTask({
           subgoalId: milestone.subgoalId,
           milestoneId, // roll the task up to the PHASE
           title: t.title.trim(),
@@ -2041,6 +2337,7 @@ export const useGoalStore = create<GoalState>()((set, get) => {
         })
         written += 1
       }
+      if (written > 0) await settleAllSurfaces()
       return written
     },
 
@@ -2092,10 +2389,11 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       const goal = tree.goal
 
       // Capacity budget: the user's available minutes in a day. The pure day-packer
-      // (below) fills each working day up to this across ALL subgoals, so the whole
-      // day's generated work never exceeds what they said they can actually do.
-      const profile = await getProfile()
-      const dayMinutes = (profile?.availableHoursPerDay ?? 4) * 60
+      // (below) fills each working day up to this across ALL subgoals AND against
+      // what every OTHER goal has already scheduled — so the day's total work, not
+      // just this goal's share of it, stays within what they said they can do.
+      const { dailyBudgetMinutes: dayMinutes, committedMinutesByDay } =
+        await loadCapacity()
 
       // Existing structure (so a re-run fills gaps instead of duplicating).
       // firstMilestoneId is the track's opening PHASE (Phase 10): the packed tasks
@@ -2112,7 +2410,10 @@ export const useGoalStore = create<GoalState>()((set, get) => {
         id: st.subgoal.id,
         title: st.subgoal.title,
         description: st.subgoal.description,
+        // A completed subgoal counts as filled, so a re-run never plans new work
+        // under something the user has closed.
         hasTasks:
+          st.subgoal.status === 'completed' ||
           st.looseTasks.length > 0 ||
           st.milestones.some((m) => m.tasks.length > 0),
         firstMilestoneId: st.milestones[0]?.milestone.id,
@@ -2229,6 +2530,14 @@ export const useGoalStore = create<GoalState>()((set, get) => {
               windowDays: maxDays,
               defaultMinutes: DEFAULT_DAILY_MINUTES,
               skipWeekdays: lightDays,
+              // Other goals' load plus habits earlier subgoals already placed here.
+              capacity: {
+                dailyBudgetMinutes: dayMinutes,
+                committedMinutesByDay: mergeCommittedMinutes(
+                  committedMinutesByDay,
+                  reservedByDay,
+                ),
+              },
             },
           )
           for (const task of occurrences) {
@@ -2265,7 +2574,14 @@ export const useGoalStore = create<GoalState>()((set, get) => {
           dailyBudgetMinutes: dayMinutes,
           skipWeekdays: lightDays,
           maxDays,
-          reservedMinutesByDay: reservedByDay,
+          // Reserve BOTH this run's recurring habits and the load every other goal
+          // already put on these days. Reserving only the former was the
+          // overcommitment bug: the packer saw an otherwise-empty calendar and
+          // refilled days that were already spoken for.
+          reservedMinutesByDay: mergeCommittedMinutes(
+            committedMinutesByDay,
+            reservedByDay,
+          ),
         })
 
         // Attach every dated task — recurring habits AND packed progression — to its
@@ -2277,7 +2593,7 @@ export const useGoalStore = create<GoalState>()((set, get) => {
         )
         for (const { subgoalId, task } of recurringOut) {
           const milestoneId = firstPhaseBySubgoal.get(subgoalId)
-          await get().addTask({
+          await writeTask({
             subgoalId,
             ...(milestoneId ? { milestoneId } : {}),
             title: task.title,
@@ -2291,7 +2607,7 @@ export const useGoalStore = create<GoalState>()((set, get) => {
         }
         for (const t of packed) {
           const milestoneId = firstPhaseBySubgoal.get(t.subgoalId)
-          await get().addTask({
+          await writeTask({
             subgoalId: t.subgoalId,
             ...(milestoneId ? { milestoneId } : {}),
             title: t.title,
@@ -2332,6 +2648,12 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       // it also cleans plans generated before the prompt fix. Runs on EVERY
       // generation (outside the pending guard) — including gap-fills and re-runs.
       await get().dedupeGoalTasks(goalId)
+
+      // The task loops above write in batch and no longer refresh per task, and
+      // dedupeGoalTasks returns early WITHOUT refreshing when it finds nothing —
+      // so settle here unconditionally. Otherwise a clean generation (the common
+      // case) would leave every cached surface showing the pre-generation state.
+      await settleAllSurfaces()
     },
 
     topUpRoadmap: async (goalId) => {
@@ -2341,8 +2663,9 @@ export const useGoalStore = create<GoalState>()((set, get) => {
 
       for (const st of tree.subgoals) {
         const sg = st.subgoal
-        // Only consistency subgoals carry a rolling daily plan to extend.
-        if (!sg.requiresConsistency) continue
+        // Only consistency subgoals carry a rolling daily plan to extend, and a
+        // finished one must not keep spending AI calls on work the user closed.
+        if (!sg.requiresConsistency || sg.status === 'completed') continue
 
         const tasks = [...st.looseTasks, ...st.milestones.flatMap((m) => m.tasks)]
         const scheduled = tasks
@@ -2384,7 +2707,7 @@ export const useGoalStore = create<GoalState>()((set, get) => {
           targetDate: sg.targetDate ?? tree.goal.targetDate,
         })
         for (const t of plan) {
-          await get().addTask({
+          await writeTask({
             subgoalId: sg.id,
             title: t.title,
             status: DEFAULT_TASK_STATUS,
@@ -2395,6 +2718,7 @@ export const useGoalStore = create<GoalState>()((set, get) => {
             ...(t.description ? { description: t.description } : {}),
           })
         }
+        if (plan.length > 0) await settleAllSurfaces()
       }
     },
 
@@ -2416,21 +2740,19 @@ export const useGoalStore = create<GoalState>()((set, get) => {
       // Overdue = scheduled before today AND not yet completed. Oldest first, so the
       // longest-missed work is placed back onto the calendar first.
       const overdue = allTasks
-        .filter(
-          (t) =>
-            t.scheduledDate !== undefined &&
-            t.scheduledDate < today &&
-            t.status !== 'completed',
-        )
+        .filter((t) => isOverdue(t, today))
         .sort((a, b) => ((a.scheduledDate ?? '') < (b.scheduledDate ?? '') ? -1 : 1))
       if (overdue.length === 0) return 0
 
-      const [goalContext, profile, userContext] = await Promise.all([
+      // Exclude the very tasks being moved: their CURRENT (past) dates must not
+      // count against the upcoming days they are being placed onto.
+      const movingIds = new Set(overdue.map((t) => t.id))
+      const [goalContext, userContext, capacity] = await Promise.all([
         getGoalContext(goalId),
-        getProfile(),
         getUserContext(),
+        loadCapacity(movingIds),
       ])
-      const dailyBudget = (profile?.availableHoursPerDay ?? 4) * 60
+      const dailyBudget = capacity.dailyBudgetMinutes
       // A hard deadline caps the window at the goal's target (overflow compresses,
       // never slips past); a soft deadline is unbounded.
       const maxDate =
@@ -2446,6 +2768,9 @@ export const useGoalStore = create<GoalState>()((set, get) => {
           dailyBudgetMinutes: dailyBudget,
           skipWeekdays: userContext?.lightDays ?? [],
           maxDate,
+          // Recovered work lands in the gaps the calendar actually has — including
+          // gaps around OTHER goals' tasks, which this used to ignore entirely.
+          committedMinutesByDay: capacity.committedMinutesByDay,
         },
       )
 
@@ -2465,11 +2790,7 @@ export const useGoalStore = create<GoalState>()((set, get) => {
         rescheduled.map((r) => ({ taskId: r.id, goalId, reason })),
       )
       const slipInsight = await slipInsightFor(goalId)
-      await settleRefreshes([
-        refreshCurrentTree(),
-        refreshDashboard(),
-        refreshCrossGoal(),
-      ])
+      await settleAllSurfaces()
       set({ currentGoalSlipInsight: slipInsight })
       return rescheduled.length
     },
@@ -2489,11 +2810,11 @@ export const useGoalStore = create<GoalState>()((set, get) => {
         .sort((a, b) => ((a.scheduledDate ?? '') < (b.scheduledDate ?? '') ? -1 : 1))
       if (overdue.length === 0) return 0
 
-      const [profile, userContext] = await Promise.all([
-        getProfile(),
+      const movingIds = new Set(overdue.map((t) => t.id))
+      const [userContext, capacity] = await Promise.all([
         getUserContext(),
+        loadCapacity(movingIds),
       ])
-      const dailyBudget = (profile?.availableHoursPerDay ?? 4) * 60
 
       const rescheduled = rescheduleOverdue(
         overdue.map((t) => ({
@@ -2502,9 +2823,12 @@ export const useGoalStore = create<GoalState>()((set, get) => {
         })),
         {
           from: now,
-          dailyBudgetMinutes: dailyBudget,
+          dailyBudgetMinutes: capacity.dailyBudgetMinutes,
           skipWeekdays: userContext?.lightDays ?? [],
           maxDate: null,
+          // The shared-budget guarantee now spans the tasks NOT being moved too,
+          // so catch-up work doesn't bury days that already have a full load.
+          committedMinutesByDay: capacity.committedMinutesByDay,
         },
       )
 
@@ -2536,11 +2860,7 @@ export const useGoalStore = create<GoalState>()((set, get) => {
         .filter((e): e is { taskId: ID; goalId: ID; reason: SlipReason } => e !== null)
       await createSlipEvents(events)
 
-      await settleRefreshes([
-        refreshCurrentTree(),
-        refreshDashboard(),
-        refreshCrossGoal(),
-      ])
+      await settleAllSurfaces()
       // If a goal is open, its pattern may have changed — refresh it in place.
       const openGoalId = get().currentGoalTree?.goal.id
       if (openGoalId) {
@@ -2641,11 +2961,107 @@ export const useGoalStore = create<GoalState>()((set, get) => {
 
       // removeSubgoal/removeMilestone refresh as they go, but a 'defer' only calls
       // updateTask (no refresh), so settle every touched surface once at the end.
-      await settleRefreshes([
-        refreshCurrentTree(),
-        refreshDashboard(),
-        refreshCrossGoal(),
+      await settleAllSurfaces()
+      return result
+    },
+
+    // ── Plan revision ────────────────────────────────────────────────────────
+    // Thin orchestration, same shape as generateScopeCutProposal: assemble the
+    // context, ask the provider, parse purely. READ-ONLY.
+    generatePlanRevisionProposal: async (goalId, changeNote) => {
+      const note = changeNote.trim()
+      if (note.length === 0) return null
+      const tree = await getGoalTree(goalId)
+      if (!tree) return null
+      const goal = tree.goal
+
+      const [userContext, goalContext, strategyBrief, digest] = await Promise.all([
+        loadAIUserContext(),
+        loadAIGoalContext(goalId),
+        getStrategyBrief(goalId),
+        roadmapDigestFor(goalId),
       ])
+      const response = await aiProvider.complete(
+        buildPlanRevisionPrompt({
+          goalId,
+          goalTitle: goal.title,
+          goalDescription: goal.description,
+          goalCategory: goal.category,
+          targetDate: goal.targetDate,
+          changeNote: note,
+          userContext,
+          goalContext,
+          strategyBrief,
+          digest,
+        }),
+      )
+      return parsePlanRevision(response)
+    },
+
+    // Enact the approved revisions. Each target is resolved against a FRESH tree per
+    // iteration (same discipline as applyScopeCut), so a target a prior 'drop'
+    // already removed simply fails to match and is reported rather than acted on
+    // with a stale id.
+    applyPlanRevision: async (goalId, changeNote, suggestions) => {
+      const result: PlanRevisionApplyResult = {
+        dropped: 0,
+        deferred: 0,
+        replanned: 0,
+        unmatched: [],
+        directionUpdated: false,
+      }
+
+      for (const suggestion of suggestions) {
+        const tree = await getGoalTree(goalId)
+        if (!tree) break
+        const match = resolveScopeCutTarget(tree, suggestion.target)
+        if (!match) {
+          result.unmatched.push(suggestion.target)
+          continue
+        }
+
+        if (suggestion.action === 'drop') {
+          if (match.kind === 'subgoal') {
+            // Cascades milestones + tasks + dependency edges.
+            await get().removeSubgoal(match.id)
+          } else {
+            // Delete the phase's tasks first so removeMilestone can't re-home them
+            // into the subgoal as orphan loose work.
+            for (const taskId of match.taskIds) await deleteTask(taskId)
+            await get().removeMilestone(match.id)
+          }
+          result.dropped += 1
+        } else if (suggestion.action === 'defer') {
+          // Off the dated plan but kept, in the undated "Later" backlog. Reversible.
+          for (const taskId of match.incompleteTaskIds) {
+            await updateTask(taskId, { scheduledDate: undefined })
+          }
+          result.deferred += 1
+        } else {
+          // 'replan' — the destination is still right but the work is now wrong.
+          // Delete the INCOMPLETE tasks only: finished work is history and must
+          // survive (dropping it would erase real progress and dent the goal's
+          // completion). The track/phase itself stays, so it keeps its place in the
+          // structure and the "Plan tasks with AI" affordance reappears on it —
+          // which regenerates from the direction this same call is about to update.
+          for (const taskId of match.incompleteTaskIds) await deleteTask(taskId)
+          if (match.kind === 'milestone') await reconcileMilestone(match.id)
+          result.replanned += 1
+        }
+      }
+
+      // Fold the change into the DIRECTION. Without this the brief still describes
+      // the old situation, and the next generation would faithfully rebuild the very
+      // work just removed. Best-effort: the plan edits above already landed and must
+      // not be reported as failed because a follow-up model call did.
+      try {
+        const brief = await get().applyCheckInChange(goalId, changeNote)
+        result.directionUpdated = brief !== null
+      } catch {
+        result.directionUpdated = false
+      }
+
+      await settleAllSurfaces()
       return result
     },
   }

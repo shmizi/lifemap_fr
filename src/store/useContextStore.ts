@@ -14,16 +14,21 @@
 // fetched on demand by the goal create/edit modal and written through saveGoalContext.
 
 import { create } from 'zustand'
-import type { UserContext, GoalContext, ID } from '@/core/types'
+import type { UserContext, GoalContext, SourceDocument, ID } from '@/core/types'
 import {
   getUserContext,
   saveUserContext as saveUserContextRow,
   getGoalContext,
   saveGoalContext as saveGoalContextRow,
   saveGoalLearnings as saveGoalLearningsRow,
+  saveGoalSourceDocument as saveGoalSourceDocumentRow,
   type SaveUserContextInput,
   type SaveGoalContextInput,
 } from '@/database/repositories'
+import { readDocumentText } from '@/core/utils/readDocumentText'
+import { buildDocumentDigestPrompt } from '@/engine/ai/prompts/documentDigest'
+import { parseDocumentDigest } from '@/engine/ai/parsers/documentDigest'
+import { aiProvider } from '@/services/ai'
 
 interface ContextState {
   // The loaded standing context, or null before one has ever been saved.
@@ -46,6 +51,22 @@ interface ContextState {
   // Focused write for the living "what I've learned" note — preserves all other
   // intake fields (read-modify-write in the repository).
   saveGoalLearnings: (goalId: ID, learnings: string) => Promise<GoalContext>
+
+  // Attach a reference document to a goal: read the file client-side, distil it
+  // ONCE through the provider, and persist only the summary — which then rides
+  // into every later generation for that goal (see core/types SourceDocument).
+  //
+  // Returns the stored SourceDocument, or null when the document held nothing
+  // worth planning around (the parser's tolerant path — not an error). Throws on
+  // an unreadable file or a provider failure so the panel can show it inline,
+  // matching how the AI modals handle their own failures.
+  attachGoalDocument: (
+    goalId: ID,
+    file: File,
+    goal: { title: string; description?: string },
+  ) => Promise<SourceDocument | null>
+  // Detach the document. The goal's other intake is preserved.
+  clearGoalDocument: (goalId: ID) => Promise<void>
 }
 
 export const useContextStore = create<ContextState>()((set) => ({
@@ -87,4 +108,41 @@ export const useContextStore = create<ContextState>()((set) => ({
   // Write-through for just the learnings note (the goal-detail inline editor).
   saveGoalLearnings: async (goalId, learnings) =>
     saveGoalLearningsRow(goalId, learnings),
+
+  // Extract -> distil -> persist. The same thin orchestration the AI actions in
+  // useGoalStore use (pure prompt builder -> provider -> pure parser), with the
+  // file read in front of it. The expensive step runs exactly ONCE, here: what
+  // gets stored is the short summary, so every later generation that renders this
+  // goal's context stays flat-cost no matter how large the original document was.
+  attachGoalDocument: async (goalId, file, goal) => {
+    // Throws UnsupportedDocumentError for a type we can't decode; the panel
+    // surfaces its message, which names the copy-paste workaround.
+    const extracted = await readDocumentText(file)
+
+    const response = await aiProvider.complete(
+      buildDocumentDigestPrompt({
+        goalTitle: goal.title,
+        goalDescription: goal.description,
+        documentName: extracted.name,
+        text: extracted.text,
+      }),
+    )
+    const summary = parseDocumentDigest(response)
+    // Nothing plannable in it — persist nothing rather than attaching an empty
+    // document that would add a dead line to every future prompt.
+    if (summary === null) return null
+
+    const sourceDocument: SourceDocument = {
+      name: extracted.name,
+      summary,
+      originalChars: extracted.originalChars,
+      addedAt: new Date().toISOString(),
+    }
+    await saveGoalSourceDocumentRow(goalId, sourceDocument)
+    return sourceDocument
+  },
+
+  clearGoalDocument: async (goalId) => {
+    await saveGoalSourceDocumentRow(goalId, null)
+  },
 }))

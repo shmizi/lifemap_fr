@@ -26,9 +26,10 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', to: ROUTES.DASHBOARD, ref: '01' },
   { label: 'Goals', to: ROUTES.GOALS, ref: '02' },
-  { label: 'Reviews', to: ROUTES.REVIEWS, ref: '03' },
-  { label: 'Discovery', to: ROUTES.DISCOVERY, ref: '04' },
-  { label: 'Settings', to: ROUTES.SETTINGS, ref: '05' },
+  { label: 'Roadmap', to: ROUTES.ROADMAP, ref: '03' },
+  { label: 'Reviews', to: ROUTES.REVIEWS, ref: '04' },
+  { label: 'Discovery', to: ROUTES.DISCOVERY, ref: '05' },
+  { label: 'Settings', to: ROUTES.SETTINGS, ref: '06' },
 ]
 
 export function Sidebar() {

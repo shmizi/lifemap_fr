@@ -79,6 +79,15 @@ export function renderGoalContextLines(context?: AIGoalContext): string[] {
   if (context.learnings && context.learnings.trim()) {
     lines.push(`What they've learned working this goal so far (adapt the plan to this): ${context.learnings.trim()}`)
   }
+  // A reference document the user attached, already distilled to its planning
+  // constraints. Labelled as authoritative because it usually IS — a syllabus or
+  // job spec states requirements the plan has to satisfy, not preferences.
+  if (context.documentSummary && context.documentSummary.trim()) {
+    const source = context.documentName?.trim()
+    lines.push(
+      `Requirements from a reference document they attached${source ? ` (${source})` : ''} — treat these as authoritative and plan to satisfy them: ${context.documentSummary.trim()}`,
+    )
+  }
   if (context.deadlineHardness === 'hard') {
     lines.push(
       'The deadline is HARD and cannot move: plan to finish before it, front-loading earlier work; never assume the date can slip.',

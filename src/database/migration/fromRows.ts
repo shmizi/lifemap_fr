@@ -22,6 +22,7 @@ import type {
   UserProfile,
   UserContext,
   GoalContext,
+  SourceDocument,
   ProgressSnapshot,
   Opportunity,
   SlipEvent,
@@ -153,6 +154,7 @@ export function goalContextFromRow(r: Row): GoalContext {
     learnings: (r.learnings as string | null) ?? undefined,
     // jsonb → object (or undefined when the column is NULL).
     strategyBrief: (r.strategy_brief as StrategyBrief | null) ?? undefined,
+    sourceDocument: (r.source_document as SourceDocument | null) ?? undefined,
     createdAt: r.created_at as string,
     updatedAt: r.updated_at as string,
   }

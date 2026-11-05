@@ -77,6 +77,14 @@ export class MockAI implements AIProvider {
       return Promise.resolve({ text: this.strategyBrief(request) })
     }
 
+    // A document-digest prompt is the only one whose SYSTEM asks to "condense a
+    // reference document". It returns PLAIN TEXT (not JSON), and its user message
+    // carries a "Goal:" line, so it must be caught before the Subgoal/Goal array
+    // branch below.
+    if (request.system.includes('condense a reference document')) {
+      return Promise.resolve({ text: this.documentDigest(request) })
+    }
+
     // A structure prompt is the only one whose SYSTEM asks for "parallel tracks".
     // It returns a NESTED array (tracks, each with a phases[] array), not the flat
     // suggestion array, so it must be caught before the Subgoal/Goal fallback (its
@@ -91,6 +99,13 @@ export class MockAI implements AIProvider {
     // "Goal:" line that would otherwise match).
     if (request.system.includes('TRIM SCOPE')) {
       return Promise.resolve({ text: this.scopeCut(request) })
+    }
+
+    // A plan-revision prompt is the only one whose SYSTEM says something "has
+    // changed in this person's situation". Like the scope cut it returns a single
+    // JSON OBJECT, so it must be caught before the Subgoal/Goal array fallback.
+    if (request.system.includes('has changed in this person')) {
+      return Promise.resolve({ text: this.planRevision(request) })
     }
 
     // A daily-plan prompt is the only one with a "Days to plan:" line — check it
@@ -144,6 +159,50 @@ export class MockAI implements AIProvider {
   // A deterministic, plausible strategy brief in the exact JSON-OBJECT shape
   // parsers/strategyBrief.ts expects. Names the goal so the output visibly
   // responds to the input, the same way the suggestion mocks do.
+  // Plan revision — the deterministic stand-in reconciles against the FIRST track
+  // named in the digest, so a developer sees a suggestion that actually resolves to
+  // something in their tree (an unresolvable target would exercise only the
+  // "unmatched" path). Echoes the change note in the rationale so it is visible
+  // that the user's words reached the prompt.
+  private planRevision(request: AIRequest): string {
+    const change = extractLine(request, 'What has changed') ?? 'the situation'
+    // Digest track lines render as "- <title> ..."; take the first as the target.
+    const trackLine = request.messages
+      .flatMap((m) => m.content.split('\n'))
+      .map((l) => l.trim())
+      .find((l) => l.startsWith('- '))
+    const target = trackLine
+      ? trackLine.slice(2).split('—')[0].split('(')[0].trim()
+      : 'the first track'
+    const proposal = {
+      summary: `Since ${change}, part of the plan targets work that no longer fits. Keep the direction, redo the affected stretch.`,
+      suggestions: [
+        {
+          target,
+          action: 'replan',
+          rationale: `The steps here were built before ${change}, so the specific work no longer matches the situation.`,
+        },
+      ],
+    }
+    return JSON.stringify(proposal, null, 2)
+  }
+
+  // Document digest — PLAIN TEXT, not JSON (the only mock branch that is). Echoes
+  // the filename so a developer can see the attachment actually reached the prompt,
+  // and returns a plausible set of planning constraints in the terse line style the
+  // real prompt asks for.
+  private documentDigest(request: AIRequest): string {
+    const name = extractLine(request, 'Document filename') ?? 'the document'
+    const goal = extractLine(request, 'Goal') ?? 'this goal'
+    return [
+      `Source: ${name}`,
+      `Required topics: foundations, core practice, and applied work toward ${goal}.`,
+      'Prerequisites: complete the foundational section before the applied one.',
+      'Assessments: one mid-point checkpoint and a final deliverable.',
+      'Constraint: material is sequential — later sections assume earlier ones.',
+    ].join('\n')
+  }
+
   private strategyBrief(request: AIRequest): string {
     const goal = extractLine(request, 'Goal') ?? 'this goal'
     const brief = {

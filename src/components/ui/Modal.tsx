@@ -11,7 +11,7 @@
 // that must block closing mid-save simply pass a guarded handler (the existing
 // modals pass their `handleClose`, which no-ops while saving).
 
-import type { ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { X } from 'lucide-react'
 
@@ -30,6 +30,29 @@ export function Modal({
   children,
   maxWidth = 'max-w-lg',
 }: ModalProps) {
+  // Escape closes the dialog from ANYWHERE while it is open. This has to be a
+  // document listener, not onKeyDown on the panel: a keydown handler on the panel
+  // only fires once focus is inside it, and nothing here autofocuses — so on a
+  // freshly-opened modal (focus still on the button that opened it) Escape did
+  // nothing at all, despite the affordance being documented.
+  //
+  // onClose is read through a ref so the listener is bound once per open rather
+  // than re-bound on every parent render (callers pass inline arrow functions).
+  // The ref is written in its own effect, never during render.
+  const onCloseRef = useRef(onClose)
+  useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
+
+  useEffect(() => {
+    if (!isOpen) return
+    const handle = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCloseRef.current()
+    }
+    document.addEventListener('keydown', handle)
+    return () => document.removeEventListener('keydown', handle)
+  }, [isOpen])
+
   return (
     <AnimatePresence>
       {isOpen ? (
@@ -60,9 +83,6 @@ export function Modal({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.97, y: 8 }}
             transition={{ duration: 0.18 }}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') onClose()
-            }}
           >
             <div className="flex shrink-0 items-center justify-between border-b-2 border-app-rule pb-3">
               <h2 className="font-display text-xl font-semibold tracking-tight text-app-text">

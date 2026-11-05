@@ -11,7 +11,13 @@
 // row per goal (keyed by goalId, upsert), so a goal's intake is a direct lookup.
 
 import { db } from '../db';
-import type { UserContext, GoalContext, StrategyBrief, ID } from '@/core/types';
+import type {
+  UserContext,
+  GoalContext,
+  StrategyBrief,
+  SourceDocument,
+  ID,
+} from '@/core/types';
 import { isCloudDataLive, cloudClient } from '@/database/backend';
 import { userContextToRow, goalContextToRow } from '@/database/migration/toRows';
 import { userContextFromRow, goalContextFromRow } from '@/database/migration/fromRows';
@@ -180,6 +186,30 @@ export async function saveGoalLearnings(
     deadlineHardness: 'soft',
     ...existing,
     learnings: learnings.trim() || undefined,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  };
+  return putGoalContext(context);
+}
+
+/**
+ * Attach (or, with null, detach) the distilled reference document on a goal.
+ * Read-modify-write like saveGoalLearnings / saveStrategyBrief, so it preserves
+ * every other intake field. Creates the row with a soft-deadline default if none
+ * exists. Only the SUMMARY is ever stored — the raw document is never persisted
+ * (see core/types SourceDocument for why).
+ */
+export async function saveGoalSourceDocument(
+  goalId: ID,
+  sourceDocument: SourceDocument | null,
+): Promise<GoalContext> {
+  const now = new Date().toISOString();
+  const existing = await getGoalContext(goalId);
+  const context: GoalContext = {
+    goalId,
+    deadlineHardness: 'soft',
+    ...existing,
+    sourceDocument: sourceDocument ?? undefined,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };

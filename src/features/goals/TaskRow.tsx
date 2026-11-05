@@ -26,9 +26,15 @@ import { TaskCreationModal } from '@/features/goals/TaskCreationModal'
 
 interface TaskRowProps {
   task: Task
+  // True for the ONE soonest still-open task in its subgoal. A generated plan lands
+  // ~2 weeks of near-identical rows at once, and every one of them looks equally
+  // urgent; this marks the single row that is actually next so the list has an
+  // entry point. The parent decides which (see pickNextTask in SubgoalSection) —
+  // this component only renders the marker.
+  isNext?: boolean
 }
 
-export function TaskRow({ task }: TaskRowProps) {
+export function TaskRow({ task, isNext = false }: TaskRowProps) {
   const toggleTaskComplete = useGoalStore((s) => s.toggleTaskComplete)
   const removeTask = useGoalStore((s) => s.removeTask)
   const [isToggling, setIsToggling] = useState(false)
@@ -69,7 +75,15 @@ export function TaskRow({ task }: TaskRowProps) {
 
   return (
     <div>
-    <div className="group flex items-center gap-2.5 rounded-md px-1 py-1">
+    {/* The next-up row gets a left ink rule + a lifted ground so the eye lands on
+        it first in a long generated run. Everything else stays flat. */}
+    <div
+      className={`group flex items-center gap-2.5 rounded-md py-1 ${
+        isNext
+          ? 'border-l-2 border-app-text bg-app-surface-alt pl-2 pr-1'
+          : 'px-1'
+      }`}
+    >
       <button
         type="button"
         onClick={handleToggle}
@@ -115,6 +129,14 @@ export function TaskRow({ task }: TaskRowProps) {
           {task.title}
         </span>
       )}
+
+      {/* Ink-filled, matching how the dashboard inverts its "Lapsed" card — the one
+          emphasised thing in the row. */}
+      {isNext ? (
+        <span className="shrink-0 bg-app-text px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-[0.14em] text-app-surface">
+          Next
+        </span>
+      ) : null}
 
       {showPriority ? (
         <span className="shrink-0 rounded-full border border-app-border px-2 py-0.5 text-[11px] text-app-text-muted">

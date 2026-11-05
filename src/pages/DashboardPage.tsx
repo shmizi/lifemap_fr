@@ -6,14 +6,15 @@
 // right rail of readouts (Upcoming deadlines, Realization tallies, an Overdue
 // notice). No living map, no floating glass panels, no persona voice.
 //
-// The living-map components (features/dashboard/livingmap/*) are intentionally
-// left in place, unused here — they are slated to become the Roadmap screen's
-// dependency plate. The page still owns the two data loads and holds no business
-// logic: the store assembles, these presentational pieces render.
+// The page still owns the two data loads and holds no business logic: the store
+// assembles, these presentational pieces render. (The old living-map panel set that
+// used to live under features/dashboard/livingmap/ was deleted once this redesign
+// stopped rendering it — recover it from git history if the Roadmap screen ever
+// wants a dependency plate.)
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { format } from 'date-fns'
+import { format, parseISO } from 'date-fns'
 import { useGoalStore } from '@/store/useGoalStore'
 import { useLifeMap } from '@/core/hooks/useLifeMap'
 import { useProfile } from '@/core/hooks/useProfile'
@@ -48,6 +49,30 @@ export function DashboardPage() {
   const toggleTaskComplete = useGoalStore((s) => s.toggleTaskComplete)
   const rescheduleAllOverdue = useGoalStore((s) => s.rescheduleAllOverdue)
   const loadDashboard = useGoalStore((s) => s.loadDashboard)
+  // Cross-goal capacity: days whose scheduled work exceeds the daily budget. New
+  // generations respect the budget, so this catches a calendar that was ALREADY
+  // over — older plans, hand-moved tasks, or a lowered daily-hours setting.
+  const overcommittedDays = useGoalStore((s) => s.overcommittedDays)
+  const dailyBudgetMinutes = useGoalStore((s) => s.dailyBudgetMinutes)
+  const rebalanceSchedule = useGoalStore((s) => s.rebalanceSchedule)
+
+  const [isRebalancing, setIsRebalancing] = useState(false)
+  const [rebalanceNote, setRebalanceNote] = useState<string | null>(null)
+  async function handleRebalance() {
+    if (isRebalancing) return
+    setIsRebalancing(true)
+    setRebalanceNote(null)
+    try {
+      const moved = await rebalanceSchedule()
+      // On success the store refreshes overcommittedDays, so the card unmounts
+      // itself — the note only has to explain a no-op or a failure.
+      if (moved === 0) setRebalanceNote('Nothing needed moving.')
+    } catch {
+      setRebalanceNote('Could not rebalance just now. Please try again.')
+    } finally {
+      setIsRebalancing(false)
+    }
+  }
 
   // Cross-goal "catch up": pull every goal's missed work forward under one shared
   // daily budget. The store refreshes overdueTasks, so a success empties it and the
@@ -89,21 +114,6 @@ export function DashboardPage() {
     )
   }, [goalProgress])
 
-  // Flash the figure whenever it changes (a tick recomputes it). Bumping a key
-  // remounts the span so the CSS animation re-fires on every change; the first
-  // render is skipped (ref starts null) so it doesn't flash before any interaction.
-  const [pulseKey, setPulseKey] = useState(0)
-  const prevPercentRef = useRef<number | null>(null)
-  useEffect(() => {
-    if (
-      prevPercentRef.current !== null &&
-      prevPercentRef.current !== overallPercent
-    ) {
-      setPulseKey((k) => k + 1)
-    }
-    prevPercentRef.current = overallPercent
-  }, [overallPercent])
-
   // Today first; fall back to the cross-goal priority list when nothing's planned.
   const focusTasks = todaysTasks.length > 0 ? todaysTasks : topPriorityTasks
   const focusIsToday = todaysTasks.length > 0
@@ -113,10 +123,14 @@ export function DashboardPage() {
     if (!lifeMap) return []
     const start = new Date()
     start.setHours(0, 0, 0, 0)
+    // parseISO, NOT new Date(): these are date-only 'YYYY-MM-DD' targets, which the
+    // Date constructor reads as UTC midnight — a day (and sometimes a month) behind
+    // the local calendar west of UTC, which both mis-filters "still ahead" and
+    // mis-renders the printed date below.
     return lifeMap.nodes
-      .filter((n) => n.date && n.state !== 'done' && new Date(n.date) >= start)
+      .filter((n) => n.date && n.state !== 'done' && parseISO(n.date) >= start)
       .map((n) => ({ id: n.id, label: n.label, date: n.date as string }))
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+      .sort((a, b) => parseISO(a.date).getTime() - parseISO(b.date).getTime())
   }, [lifeMap])
 
   const now = new Date()
@@ -127,9 +141,13 @@ export function DashboardPage() {
     return <EmptyOrLoading isLoading={isLoading} onStart={() => navigate(ROUTES.GOALS)} />
   }
 
-  // Row-2 index cards: the nearest deadlines, with an inverted "lapsed" card taking
-  // the first slot when work has slipped (so the overdue nudge reads as an accent).
-  const deadlineCards = upcoming.slice(0, overdueTasks.length > 0 ? 2 : 3)
+  // Row-2 index cards. Three slots: notices claim them first (the inverted "lapsed"
+  // card, then the over-capacity card), and the nearest deadlines fill whatever is
+  // left — so the row never wraps and the accents read before the routine entries.
+  const isOverCapacity = overcommittedDays.length > 0
+  const noticeCount = (overdueTasks.length > 0 ? 1 : 0) + (isOverCapacity ? 1 : 0)
+  const deadlineCards = upcoming.slice(0, Math.max(0, 3 - noticeCount))
+  const budgetHours = Math.round((dailyBudgetMinutes / 60) * 10) / 10
 
   return (
     // A single fixed screen (the shell bounds the height; overflow-hidden means the
@@ -150,17 +168,12 @@ export function DashboardPage() {
               Registry of active &amp; latent intentions · {format(now, 'd LLLL yyyy')}
             </p>
           </div>
-          {/* pr gives the italic “%” (which leans right) and the sweep highlight room
-              so neither is clipped by the masthead's overflow-hidden edge; leading is
-              relaxed so the tall figure isn't clipped at the top either. */}
+          {/* pr gives the italic “%” (which leans right) room so it isn't clipped by
+              the masthead's overflow-hidden edge; leading is relaxed so the tall
+              figure isn't clipped at the top either. */}
           <div className="shrink-0 pr-[0.32em] text-right">
             <div className="font-display text-[2.6rem] font-semibold italic leading-[1.22] tracking-tight text-app-text">
-              <span
-                key={pulseKey}
-                className={`inline-block ${pulseKey > 0 ? 'animate-realization-flash' : ''}`}
-              >
-                {overallPercent}%
-              </span>
+              {overallPercent}%
             </div>
             <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.2em] text-app-text-muted">
               Total realization
@@ -238,7 +251,40 @@ export function DashboardPage() {
             </div>
           )}
 
-          {upcoming.length === 0 && overdueTasks.length === 0 ? (
+          {/* Over-capacity notice. Outlined, not inverted, so the lapsed card stays
+              the loudest thing in the row. */}
+          {isOverCapacity && (
+            <div className="flex flex-col border border-app-text bg-app-surface p-4">
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-app-text">
+                  Over capacity
+                </span>
+                <span className="border border-app-text px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-[0.14em] text-app-text">
+                  {overcommittedDays.length}
+                </span>
+              </div>
+              <p className="mt-2 font-display text-[15px] leading-snug text-app-text">
+                {overcommittedDays.length}{' '}
+                {overcommittedDays.length === 1 ? 'day holds' : 'days hold'} more
+                than your {budgetHours}h.
+              </p>
+              <button
+                type="button"
+                onClick={handleRebalance}
+                disabled={isRebalancing}
+                className="mt-auto w-full bg-app-text px-3 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-app-surface transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isRebalancing ? 'Rebalancing…' : 'Rebalance'}
+              </button>
+              {rebalanceNote && (
+                <p className="mt-2 font-mono text-[9px] uppercase tracking-[0.12em] text-app-text-muted">
+                  {rebalanceNote}
+                </p>
+              )}
+            </div>
+          )}
+
+          {upcoming.length === 0 && overdueTasks.length === 0 && !isOverCapacity ? (
             <div className="border border-app-border bg-app-surface p-4 sm:col-span-3">
               <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-app-text-muted">
                 Upcoming
@@ -265,7 +311,7 @@ export function DashboardPage() {
                   {u.label}
                 </h3>
                 <span className="mt-auto pt-3 font-mono text-[11px] uppercase tracking-[0.14em] text-app-text-muted">
-                  {format(new Date(u.date), 'd LLL yyyy')}
+                  {format(parseISO(u.date), 'd LLL yyyy')}
                 </span>
               </div>
             ))

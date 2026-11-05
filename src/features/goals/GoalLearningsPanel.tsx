@@ -27,13 +27,18 @@ export function GoalLearningsPanel({ goalId }: { goalId: ID }) {
 
   useEffect(() => {
     let active = true
-    void fetchGoalContext(goalId).then((ctx) => {
-      if (!active) return
-      const v = ctx?.learnings ?? ''
-      setValue(v)
-      setSavedValue(v)
-      setLoaded(true)
-    })
+    // A failed read leaves the note disabled and empty rather than rejecting into
+    // the void — the panel is secondary, so it degrades quietly like the rest of
+    // the calm-failure plumbing.
+    void fetchGoalContext(goalId)
+      .then((ctx) => {
+        if (!active) return
+        const v = ctx?.learnings ?? ''
+        setValue(v)
+        setSavedValue(v)
+        setLoaded(true)
+      })
+      .catch(() => {})
     return () => {
       active = false
     }

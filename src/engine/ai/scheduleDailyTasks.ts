@@ -62,20 +62,57 @@ export function computePlanWindow(
 // `skipWeekdays` are day-of-week indices (0 = Sunday .. 6 = Saturday), matching
 // UserContext.lightDays and Date.getDay(). If every weekday is marked off (a
 // degenerate input) the skip is ignored, so this can never loop forever.
+// Cross-goal capacity, optional. Without it this places one session per working
+// day against an empty calendar — which is what let several goals each fill the
+// same day independently. With it, a day that cannot HOLD the session on top of its
+// existing committed minutes is skipped, so a new plan slots into the days that have
+// real room rather than overflowing ones another goal already claimed. A session
+// bigger than the whole budget still lands on a day that is otherwise empty.
+//
+// One session per working day remains the rule (this is a daily-practice plan, not
+// the cross-subgoal packer) — capacity only decides WHICH days are eligible.
+export interface DailyCapacity {
+  dailyBudgetMinutes: number
+  committedMinutesByDay: Record<ISODate, number>
+}
+
 export function scheduleDailyTasks(
   sessions: PlannedSession[],
   startDate: Date,
   defaultMinutes: number,
   skipWeekdays: number[] = [],
+  capacity?: DailyCapacity,
 ): ScheduledDailyTask[] {
   const skip = skipWeekdays.length >= 7 ? new Set<number>() : new Set(skipWeekdays)
+  // A guard on the forward scan below: without a bound, a calendar that is full for
+  // a very long stretch would walk the cursor indefinitely. Past this many days we
+  // place the session anyway — overflowing a day is better than dropping work or
+  // hanging. Generous enough that a realistic calendar never reaches it.
+  const MAX_SKIP_AHEAD_DAYS = 365
+  const budget = capacity ? Math.max(1, capacity.dailyBudgetMinutes) : 0
+  const committedOnDay = (d: Date): number =>
+    capacity?.committedMinutesByDay[format(d, DATE_KEY)] ?? 0
+
   const out: ScheduledDailyTask[] = []
   let cursor = startDate
   for (const session of sessions) {
+    const estimatedMinutes = session.minutes ?? defaultMinutes
     // Advance to the next day that is not a day off.
     while (skip.has(cursor.getDay())) cursor = addDays(cursor, 1)
+    // ...and, when capacity is known, past any day that can't hold this session.
+    if (capacity) {
+      let scanned = 0
+      while (
+        committedOnDay(cursor) > 0 &&
+        committedOnDay(cursor) + estimatedMinutes > budget &&
+        scanned < MAX_SKIP_AHEAD_DAYS
+      ) {
+        cursor = addDays(cursor, 1)
+        while (skip.has(cursor.getDay())) cursor = addDays(cursor, 1)
+        scanned += 1
+      }
+    }
     const scheduledDate = format(cursor, DATE_KEY)
-    const estimatedMinutes = session.minutes ?? defaultMinutes
     out.push(
       session.description
         ? {
@@ -104,6 +141,10 @@ export interface ExpandRecurringOptions {
   // SKIPPED (not shifted) — a habit doesn't run on a day the user marked off, and
   // skipping avoids two occurrences piling onto the same next-working-day.
   skipWeekdays?: number[]
+  // Cross-goal capacity. An occurrence that doesn't fit its day is SKIPPED, the same
+  // rule as a rest day: a habit keeps its cadence rather than drifting onto other
+  // dates. Occurrences placed here count against later ones in the same call.
+  capacity?: DailyCapacity
 }
 
 // Expand each RECURRING session into its dated occurrences across the plan window,
@@ -130,6 +171,9 @@ export function expandRecurringSessions(
   let base = opts.startDate
   while (skip.has(base.getDay())) base = addDays(base, 1)
 
+  const budget = opts.capacity ? Math.max(1, opts.capacity.dailyBudgetMinutes) : 0
+  const used: Record<ISODate, number> = { ...opts.capacity?.committedMinutesByDay }
+
   const out: ScheduledDailyTask[] = []
   for (const session of sessions) {
     if (!session.recurrence) continue
@@ -141,6 +185,11 @@ export function expandRecurringSessions(
       if (differenceInCalendarDays(day, opts.startDate) >= windowDays) break
       if (skip.has(day.getDay())) continue // habit skips rest days
       const scheduledDate = format(day, DATE_KEY)
+      if (opts.capacity) {
+        const onDay = used[scheduledDate] ?? 0
+        if (onDay > 0 && onDay + estimatedMinutes > budget) continue
+        used[scheduledDate] = onDay + estimatedMinutes
+      }
       out.push(
         session.description
           ? {

@@ -6,6 +6,13 @@
 import { Check } from '@phosphor-icons/react'
 import type { Task } from '@/core/types'
 
+// How many entries the ledger prints. Deliberately bounded: with several active
+// goals a generated day can run to dozens of tasks, and a wall of them is the
+// opposite of "what should I do today". The remainder is COUNTED below rather than
+// silently dropped — the old code sliced to this number with nothing to show for
+// it, so a 30-task day looked identical to an 8-task one.
+const LEDGER_LIMIT = 8
+
 interface FocusLedgerProps {
   tasks: Task[]
   onToggle: (task: Task) => void
@@ -25,9 +32,15 @@ export function FocusLedger({ tasks, onToggle }: FocusLedgerProps) {
     )
   }
 
+  // Open entries only for the overflow count — telling someone "+12 more" when ten
+  // of them are already ticked would overstate what is actually left.
+  const hidden = tasks.slice(LEDGER_LIMIT)
+  const hiddenOpen = hidden.filter((t) => t.status !== 'completed').length
+
   return (
+    <>
     <ul>
-      {tasks.slice(0, 8).map((task, i) => {
+      {tasks.slice(0, LEDGER_LIMIT).map((task, i) => {
         const done = task.status === 'completed'
         const mins = formatMins(task.estimatedMinutes)
         return (
@@ -66,5 +79,12 @@ export function FocusLedger({ tasks, onToggle }: FocusLedgerProps) {
         )
       })}
     </ul>
+
+    {hiddenOpen > 0 ? (
+      <p className="pt-2.5 font-mono text-[10px] uppercase tracking-[0.14em] text-app-text-muted">
+        + {hiddenOpen} more scheduled today · filed under their goals
+      </p>
+    ) : null}
+    </>
   )
 }
